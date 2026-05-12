@@ -1,0 +1,91 @@
+# Counterfeit Currency Detection - Setup Commands
+
+---
+
+# Activate Virtual Environment
+
+## PowerShell
+
+venv\Scripts\Activate
+
+---
+
+# Install Requirements
+
+pip install -r requirements.txt
+
+---
+
+# Run Prediction System
+
+python preprocessing/predict.py
+
+---
+
+# Run FastAPI Backend
+
+uvicorn backend.main:app --reload
+
+---
+
+# FastAPI Swagger Docs
+
+http://127.0.0.1:8000/docs
+
+---
+
+# Generate Requirements File
+
+pip freeze > requirements.txt
+
+---
+
+# Git Commands
+
+## Initialize Git
+
+git init
+
+## Add Files
+
+git add .
+
+## Commit Changes
+
+git commit -m "your message"
+
+## Push Code
+
+git push
+
+---
+
+# Important Packages
+
+pip install tensorflow
+pip install opencv-python
+pip install numpy
+pip install matplotlib
+pip install scikit-learn
+pip install fastapi
+pip install uvicorn
+pip install python-multipart
+
+---
+
+# Jupyter Notebook
+
+jupyter notebook
+
+---
+
+# Project Structure
+
+backend/
+preprocessing/
+models/
+notebooks/
+dataset/
+docs/
+
+---

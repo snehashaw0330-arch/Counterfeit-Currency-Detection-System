@@ -1,0 +1,5 @@
+venv/
+dataset/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
