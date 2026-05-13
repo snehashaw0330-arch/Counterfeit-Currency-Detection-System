@@ -89,3 +89,25 @@ dataset/
 docs/
 
 ---
+
+---
+
+# Remove Large Files From Git Tracking
+
+git rm -r --cached dataset
+
+git rm -r --cached venv
+
+git rm -r --cached .ipynb_checkpoints
+
+---
+
+# Recommended .gitignore Content
+
+venv/
+dataset/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+---
