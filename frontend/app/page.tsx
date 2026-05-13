@@ -384,7 +384,7 @@ export default function Home() {
               ">
 
                 {
-                  result.serial_number
+                  result?.forensic_analysis?.ocr_serial_number
                   || "Not Available"
                 }
 
