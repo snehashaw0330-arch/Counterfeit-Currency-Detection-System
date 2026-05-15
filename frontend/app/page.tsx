@@ -3,6 +3,43 @@
 import { useState } from "react";
 import axios from "axios";
 
+type ForensicCheck = {
+  status: "PASS" | "FAIL" | "INFO";
+  details: string;
+  value?: string | null;
+};
+
+type ForensicAnalysis = {
+  uv_light_detection: ForensicCheck;
+  watermark_detection: ForensicCheck;
+  ocr_serial_number: ForensicCheck;
+  gandhi_face_analysis: ForensicCheck;
+  security_thread_detection: ForensicCheck;
+  hologram_detection: ForensicCheck;
+  denomination_classification: ForensicCheck;
+  modular_ai_pipeline: ForensicCheck;
+};
+
+type PredictResponse = {
+  status: "success" | "error";
+  prediction?: "REAL" | "FAKE" | "SUSPICIOUS";
+  confidence?: string;
+  raw_prediction?: number;
+  model_verdict?: "REAL" | "FAKE";
+  model_confidence?: string;
+  forensic_score?: number;
+  forensic_pass_count?: number;
+  forensic_total_checks?: number;
+  forensic_analysis?: ForensicAnalysis;
+  message?: string;
+};
+
+const VERDICT_COLOR: Record<string, string> = {
+  REAL: "text-green-400",
+  FAKE: "text-red-400",
+  SUSPICIOUS: "text-yellow-400",
+};
+
 export default function Home() {
 
   // =====================================================
@@ -19,7 +56,7 @@ export default function Home() {
     useState(false);
 
   const [result, setResult] =
-    useState<any>(null);
+    useState<PredictResponse | null>(null);
 
   // =====================================================
   // HANDLE IMAGE CHANGE
@@ -284,7 +321,7 @@ export default function Home() {
             gap-6
             ">
 
-              {/* PREDICTION */}
+              {/* FINAL VERDICT */}
 
               <div className="
               bg-zinc-900
@@ -294,30 +331,23 @@ export default function Home() {
               border-zinc-700
               ">
 
-                <h3 className="
-                text-gray-400
-                mb-2
-                ">
-
-                  Prediction
-
+                <h3 className="text-gray-400 mb-2">
+                  Final Verdict
                 </h3>
 
                 <p
                   className={`
                   text-3xl
                   font-bold
-                  ${
-                    result.prediction ===
-                    "REAL"
-                    ? "text-green-400"
-                    : "text-red-400"
-                  }
+                  ${VERDICT_COLOR[result.prediction ?? ""]
+                    ?? "text-gray-300"}
                   `}
                 >
-
                   {result.prediction}
+                </p>
 
+                <p className="text-xs text-gray-500 mt-2">
+                  Model + Forensic combined
                 </p>
 
               </div>
@@ -332,13 +362,8 @@ export default function Home() {
               border-zinc-700
               ">
 
-                <h3 className="
-                text-gray-400
-                mb-2
-                ">
-
+                <h3 className="text-gray-400 mb-2">
                   Confidence
-
                 </h3>
 
                 <p className="
@@ -346,9 +371,75 @@ export default function Home() {
                 font-bold
                 text-yellow-400
                 ">
-
                   {result.confidence}
+                </p>
 
+                <p className="text-xs text-gray-500 mt-2">
+                  Forensic pass: {result.forensic_pass_count ?? 0}
+                  /{result.forensic_total_checks ?? 0}
+                </p>
+
+              </div>
+
+            </div>
+
+            {/* MODEL BREAKDOWN */}
+
+            <div className="
+            mt-6
+            grid
+            grid-cols-1
+            md:grid-cols-2
+            gap-6
+            ">
+
+              <div className="
+              bg-zinc-900
+              p-4
+              rounded-2xl
+              border
+              border-zinc-700
+              ">
+
+                <h4 className="text-gray-400 text-sm mb-1">
+                  ML Model Verdict
+                </h4>
+
+                <p
+                  className={`
+                  text-xl
+                  font-bold
+                  ${VERDICT_COLOR[result.model_verdict ?? ""]
+                    ?? "text-gray-300"}
+                  `}
+                >
+                  {result.model_verdict}
+                  <span className="
+                  text-gray-500
+                  text-sm
+                  font-normal
+                  ml-2
+                  ">
+                    ({result.model_confidence})
+                  </span>
+                </p>
+
+              </div>
+
+              <div className="
+              bg-zinc-900
+              p-4
+              rounded-2xl
+              border
+              border-zinc-700
+              ">
+
+                <h4 className="text-gray-400 text-sm mb-1">
+                  Forensic Score
+                </h4>
+
+                <p className="text-xl font-bold text-blue-400">
+                  {result.forensic_score?.toFixed(1)}%
                 </p>
 
               </div>
@@ -381,11 +472,28 @@ export default function Home() {
               <p className="
               text-green-400
               break-words
+              text-2xl
+              font-mono
               ">
 
                 {
-                  result?.forensic_analysis?.ocr_serial_number
-                  || "Not Available"
+                  result?.forensic_analysis
+                    ?.ocr_serial_number?.value
+                  || "Not Detected"
+                }
+
+              </p>
+
+              <p className="
+              text-gray-500
+              text-sm
+              mt-2
+              ">
+
+                {
+                  result?.forensic_analysis
+                    ?.ocr_serial_number?.details
+                  || ""
                 }
 
               </p>
@@ -417,34 +525,42 @@ export default function Home() {
 
                 <FeatureCard
                   title="UV Light Detection"
+                  check={result?.forensic_analysis?.uv_light_detection}
                 />
 
                 <FeatureCard
                   title="Watermark Detection"
+                  check={result?.forensic_analysis?.watermark_detection}
                 />
 
                 <FeatureCard
                   title="OCR Serial Number"
+                  check={result?.forensic_analysis?.ocr_serial_number}
                 />
 
                 <FeatureCard
                   title="Gandhi Face Analysis"
+                  check={result?.forensic_analysis?.gandhi_face_analysis}
                 />
 
                 <FeatureCard
                   title="Security Thread Detection"
+                  check={result?.forensic_analysis?.security_thread_detection}
                 />
 
                 <FeatureCard
                   title="Hologram Detection"
+                  check={result?.forensic_analysis?.hologram_detection}
                 />
 
                 <FeatureCard
                   title="Denomination Classification"
+                  check={result?.forensic_analysis?.denomination_classification}
                 />
 
                 <FeatureCard
                   title="Modular AI Pipeline"
+                  check={result?.forensic_analysis?.modular_ai_pipeline}
                 />
 
               </div>
@@ -460,26 +576,89 @@ export default function Home() {
 // FEATURE CARD COMPONENT
 // =====================================================
 
+const STATUS_STYLES = {
+  PASS: {
+    badge: "bg-green-500/20 text-green-400 border-green-500/40",
+    border: "border-green-500/40",
+    label: "PASS",
+  },
+  FAIL: {
+    badge: "bg-red-500/20 text-red-400 border-red-500/40",
+    border: "border-red-500/40",
+    label: "FAIL",
+  },
+  INFO: {
+    badge: "bg-yellow-500/20 text-yellow-400 border-yellow-500/40",
+    border: "border-yellow-500/40",
+    label: "INFO",
+  },
+} as const;
+
 function FeatureCard({
-  title
+  title,
+  check,
 }: {
-  title: string
+  title: string;
+  check?: ForensicCheck;
 }) {
+
+  const status = check?.status ?? "INFO";
+  const style = STATUS_STYLES[status];
 
   return (
 
-    <div className="
-    bg-zinc-900
-    p-4
-    rounded-xl
-    border
-    border-zinc-700
-    hover:border-green-500
-    transition-all
-    duration-300
-    ">
+    <div
+      className={`
+      bg-zinc-900
+      p-4
+      rounded-xl
+      border
+      ${style.border}
+      transition-all
+      duration-300
+      `}
+    >
 
-      {title}
+      <div className="
+      flex
+      justify-between
+      items-center
+      mb-2
+      ">
+
+        <span className="font-semibold">{title}</span>
+
+        <span
+          className={`
+          text-xs
+          font-bold
+          px-2
+          py-0.5
+          rounded-full
+          border
+          ${style.badge}
+          `}
+        >
+          {style.label}
+        </span>
+
+      </div>
+
+      <p className="text-sm text-gray-400 break-words">
+        {check?.details ?? "Awaiting result"}
+      </p>
+
+      {check?.value && (
+        <p className="
+        text-sm
+        text-green-400
+        font-mono
+        mt-1
+        break-words
+        ">
+          {check.value}
+        </p>
+      )}
 
     </div>
   );

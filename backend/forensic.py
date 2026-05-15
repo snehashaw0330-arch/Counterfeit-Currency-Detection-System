@@ -1,0 +1,565 @@
+"""
+Forensic Analysis Pipeline for Indian Currency Notes.
+
+Each function takes a BGR numpy image (as read by cv2 / converted from PIL)
+and returns a dict with at minimum:
+    {"status": "PASS" | "FAIL" | "INFO", "details": <str>}
+
+The pipeline is intentionally tolerant: if a feature cannot be evaluated
+it returns status "INFO" with a human readable explanation instead of
+raising. This keeps the API response stable for the frontend.
+"""
+
+import os
+import re
+import shutil
+import platform
+
+import cv2
+import numpy as np
+import pytesseract
+
+
+# =====================================================
+# TESSERACT BINARY AUTO DETECTION
+# =====================================================
+
+def _configure_tesseract():
+
+    if shutil.which("tesseract"):
+        return True
+
+    candidates = []
+
+    if platform.system() == "Windows":
+
+        candidates = [
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            os.path.expandvars(
+                r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"
+            ),
+        ]
+
+    for path in candidates:
+
+        if path and os.path.exists(path):
+
+            pytesseract.pytesseract.tesseract_cmd = path
+
+            return True
+
+    return False
+
+
+TESSERACT_AVAILABLE = _configure_tesseract()
+
+
+# =====================================================
+# UTILITIES
+# =====================================================
+
+def _ensure_bgr(image):
+
+    if image is None:
+        raise ValueError("Image is None")
+
+    if image.ndim == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    if image.ndim == 3 and image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+
+    return image
+
+
+def _to_gray(image):
+
+    return cv2.cvtColor(_ensure_bgr(image), cv2.COLOR_BGR2GRAY)
+
+
+# =====================================================
+# 1. OCR SERIAL NUMBER
+# =====================================================
+# Indian banknotes carry two serial numbers (top-left
+# small font, bottom-right larger font). The pattern is
+# typically 3 letters + space + 6 or 7 digits, e.g.
+# "0AB 123456" or "5AA 765432".
+
+SERIAL_REGEX = re.compile(
+    r"\b([0-9A-Z]{1,3})\s?([0-9]{6,7})\b"
+)
+
+
+def _ocr_region(region):
+
+    if not TESSERACT_AVAILABLE:
+        return ""
+
+    config = (
+        "--oem 3 --psm 7 "
+        "-c tessedit_char_whitelist="
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+    )
+
+    try:
+        text = pytesseract.image_to_string(
+            region,
+            config=config
+        )
+    except Exception:
+        return ""
+
+    return text.strip().replace("\n", " ")
+
+
+def _preprocess_for_ocr(region):
+
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+    gray = cv2.resize(
+        gray,
+        None,
+        fx=2.0,
+        fy=2.0,
+        interpolation=cv2.INTER_CUBIC
+    )
+
+    gray = cv2.bilateralFilter(gray, 9, 75, 75)
+
+    _, binary = cv2.threshold(
+        gray,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+
+    return binary
+
+
+def extract_serial_number(image):
+
+    if not TESSERACT_AVAILABLE:
+
+        return {
+            "status": "INFO",
+            "details": "Tesseract OCR engine not installed",
+            "value": None
+        }
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    # Two candidate crops where serials live
+    crops = [
+        img[0:int(h * 0.30), 0:int(w * 0.55)],
+        img[int(h * 0.55):h, int(w * 0.45):w],
+    ]
+
+    candidates = []
+
+    for crop in crops:
+
+        if crop.size == 0:
+            continue
+
+        processed = _preprocess_for_ocr(crop)
+
+        text = _ocr_region(processed)
+
+        for match in SERIAL_REGEX.finditer(text):
+
+            serial = f"{match.group(1)} {match.group(2)}"
+            candidates.append(serial)
+
+    # Fallback: OCR whole image if no candidate found
+    if not candidates:
+
+        whole = _preprocess_for_ocr(img)
+        text = _ocr_region(whole)
+
+        for match in SERIAL_REGEX.finditer(text):
+
+            serial = f"{match.group(1)} {match.group(2)}"
+            candidates.append(serial)
+
+    if not candidates:
+
+        return {
+            "status": "FAIL",
+            "details": "No serial number pattern detected",
+            "value": None
+        }
+
+    # Dedupe while preserving order
+    seen = set()
+    unique = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+
+    return {
+        "status": "PASS",
+        "details": f"Detected {len(unique)} serial candidate(s)",
+        "value": " | ".join(unique)
+    }
+
+
+# =====================================================
+# 2. UV LIGHT FEATURE DETECTION
+# =====================================================
+# Without a UV camera we approximate by looking for
+# bright fluorescent-like high-saturation patches that
+# real notes exhibit under visible light too (security
+# fibers and reactive ink areas).
+
+def analyze_uv_features(image):
+
+    img = _ensure_bgr(image)
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    high_sat = cv2.inRange(
+        hsv,
+        (0, 120, 120),
+        (179, 255, 255)
+    )
+
+    ratio = float(np.count_nonzero(high_sat)) / high_sat.size
+
+    if ratio >= 0.015:
+
+        return {
+            "status": "PASS",
+            "details": (
+                f"Reactive ink signature found "
+                f"({ratio * 100:.2f}% of pixels)"
+            )
+        }
+
+    return {
+        "status": "FAIL",
+        "details": (
+            f"Insufficient UV reactive signature "
+            f"({ratio * 100:.2f}% of pixels)"
+        )
+    }
+
+
+# =====================================================
+# 3. WATERMARK DETECTION
+# =====================================================
+# Indian notes carry a Gandhi watermark on the left
+# blank panel. We score local brightness variance in
+# that panel: a real watermark produces a soft
+# gradient, a counterfeit print is flat or noisy.
+
+def detect_watermark(image):
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    panel = img[
+        int(h * 0.15):int(h * 0.85),
+        0:int(w * 0.25)
+    ]
+
+    if panel.size == 0:
+
+        return {
+            "status": "INFO",
+            "details": "Image too small to evaluate"
+        }
+
+    gray = cv2.cvtColor(panel, cv2.COLOR_BGR2GRAY)
+
+    blurred = cv2.GaussianBlur(gray, (21, 21), 0)
+
+    variance = float(np.var(blurred))
+
+    if 80 <= variance <= 2500:
+
+        return {
+            "status": "PASS",
+            "details": (
+                f"Watermark gradient detected "
+                f"(variance {variance:.1f})"
+            )
+        }
+
+    return {
+        "status": "FAIL",
+        "details": (
+            f"No expected watermark gradient "
+            f"(variance {variance:.1f})"
+        )
+    }
+
+
+# =====================================================
+# 4. GANDHI FACE ANALYSIS
+# =====================================================
+
+_FACE_CASCADE = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
+
+
+def analyze_gandhi_face(image):
+
+    img = _ensure_bgr(image)
+    gray = _to_gray(img)
+
+    if _FACE_CASCADE.empty():
+
+        return {
+            "status": "INFO",
+            "details": "Face cascade not available"
+        }
+
+    faces = _FACE_CASCADE.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=4,
+        minSize=(40, 40)
+    )
+
+    if len(faces) == 0:
+
+        return {
+            "status": "FAIL",
+            "details": "No portrait detected on note"
+        }
+
+    return {
+        "status": "PASS",
+        "details": f"{len(faces)} portrait region(s) detected"
+    }
+
+
+# =====================================================
+# 5. SECURITY THREAD DETECTION
+# =====================================================
+# Vertical thin line that runs top-to-bottom on a real
+# note. We look for long vertical edges in the central
+# 30% strip of the image.
+
+def detect_security_thread(image):
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    strip = img[
+        0:h,
+        int(w * 0.35):int(w * 0.65)
+    ]
+
+    if strip.size == 0:
+
+        return {
+            "status": "INFO",
+            "details": "Image too small to evaluate"
+        }
+
+    gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
+
+    edges = cv2.Canny(gray, 60, 180)
+
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=80,
+        minLineLength=int(h * 0.4),
+        maxLineGap=15
+    )
+
+    if lines is None:
+
+        return {
+            "status": "FAIL",
+            "details": "No security thread detected"
+        }
+
+    vertical = 0
+
+    for line in lines:
+
+        x1, y1, x2, y2 = line[0]
+
+        if abs(x2 - x1) < 8 and abs(y2 - y1) > h * 0.3:
+
+            vertical += 1
+
+    if vertical >= 1:
+
+        return {
+            "status": "PASS",
+            "details": f"{vertical} vertical thread segment(s) found"
+        }
+
+    return {
+        "status": "FAIL",
+        "details": "No vertical thread pattern"
+    }
+
+
+# =====================================================
+# 6. HOLOGRAM / OPTICAL VARIABLE INK DETECTION
+# =====================================================
+# Holographic patches show high local hue variance.
+
+def detect_hologram(image):
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    patch = img[
+        int(h * 0.55):int(h * 0.95),
+        int(w * 0.05):int(w * 0.30)
+    ]
+
+    if patch.size == 0:
+
+        return {
+            "status": "INFO",
+            "details": "Image too small to evaluate"
+        }
+
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+
+    hue_std = float(np.std(hsv[:, :, 0]))
+    sat_std = float(np.std(hsv[:, :, 1]))
+
+    score = hue_std * 0.6 + sat_std * 0.4
+
+    if score >= 30:
+
+        return {
+            "status": "PASS",
+            "details": (
+                f"Optical variance detected "
+                f"(score {score:.1f})"
+            )
+        }
+
+    return {
+        "status": "FAIL",
+        "details": (
+            f"No optical variance "
+            f"(score {score:.1f})"
+        )
+    }
+
+
+# =====================================================
+# 7. DENOMINATION CLASSIFICATION
+# =====================================================
+
+_KNOWN_DENOMINATIONS = {
+    "10", "20", "50", "100", "200", "500", "2000"
+}
+
+
+def classify_denomination(image):
+
+    if not TESSERACT_AVAILABLE:
+
+        return {
+            "status": "INFO",
+            "details": "Tesseract OCR engine not installed",
+            "value": None
+        }
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    # Denomination digits appear top-right and bottom-left
+    crops = [
+        img[0:int(h * 0.35), int(w * 0.65):w],
+        img[int(h * 0.60):h, 0:int(w * 0.35)],
+    ]
+
+    detected = []
+
+    for crop in crops:
+
+        if crop.size == 0:
+            continue
+
+        processed = _preprocess_for_ocr(crop)
+
+        try:
+            text = pytesseract.image_to_string(
+                processed,
+                config=(
+                    "--oem 3 --psm 7 "
+                    "-c tessedit_char_whitelist=0123456789"
+                )
+            )
+        except Exception:
+            continue
+
+        for token in re.findall(r"\d+", text):
+
+            if token in _KNOWN_DENOMINATIONS:
+
+                detected.append(token)
+
+    if not detected:
+
+        return {
+            "status": "FAIL",
+            "details": "Could not read denomination",
+            "value": None
+        }
+
+    # Pick most frequent
+    value = max(set(detected), key=detected.count)
+
+    return {
+        "status": "PASS",
+        "details": f"Denomination Rs. {value}",
+        "value": value
+    }
+
+
+# =====================================================
+# PIPELINE ORCHESTRATOR
+# =====================================================
+
+def run_forensic_pipeline(image):
+    """
+    Run every forensic check. Each individual failure is
+    caught so one broken check never breaks the response.
+    """
+
+    checks = {
+        "uv_light_detection": analyze_uv_features,
+        "watermark_detection": detect_watermark,
+        "ocr_serial_number": extract_serial_number,
+        "gandhi_face_analysis": analyze_gandhi_face,
+        "security_thread_detection": detect_security_thread,
+        "hologram_detection": detect_hologram,
+        "denomination_classification": classify_denomination,
+    }
+
+    results = {}
+
+    for name, fn in checks.items():
+
+        try:
+            results[name] = fn(image)
+        except Exception as exc:
+            results[name] = {
+                "status": "INFO",
+                "details": f"Error: {exc}"
+            }
+
+    results["modular_ai_pipeline"] = {
+        "status": "PASS",
+        "details": "Pipeline executed successfully"
+    }
+
+    return results

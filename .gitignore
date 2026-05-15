@@ -3,3 +3,19 @@ dataset/
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
+
+# Frontend
+node_modules/
+.next/
+out/
+
+# Tests / IDE
+.pytest_cache/
+.vscode/
+.idea/
+
+# Claude Code session data
+.claude/
+
+# Backend debug crops
+backend/*.jpg

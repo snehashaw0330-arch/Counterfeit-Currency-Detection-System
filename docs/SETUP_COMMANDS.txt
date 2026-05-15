@@ -2,103 +2,122 @@
 
 ---
 
-# Activate Virtual Environment
+# 0. Prerequisites (one-time, system level)
 
-## PowerShell
+## Install Tesseract OCR (required for serial number + denomination reading)
+
+### PowerShell (Windows)
+
+winget install --id UB-Mannheim.TesseractOCR --accept-source-agreements --accept-package-agreements --silent
+
+This installs Tesseract to:
+C:\Program Files\Tesseract-OCR\tesseract.exe
+
+The backend auto-detects this path. No PATH edit required.
+
+## Node + npm (frontend)
+
+Make sure Node.js 18+ is installed. Verify:
+
+node --version
+npm --version
+
+## Python 3.11+
+
+python --version
+
+---
+
+# 1. Backend Setup
+
+## Create virtual environment (one time)
+
+cd c:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System
+python -m venv venv
+
+## Activate venv
+
+### PowerShell
 
 venv\Scripts\Activate
 
----
+### Bash / Git Bash
 
-# Install Requirements
+source venv/Scripts/activate
+
+## Install backend dependencies
 
 pip install -r requirements.txt
+pip install pytesseract
+
+## Run backend (FastAPI + uvicorn)
+
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+Server: http://127.0.0.1:8000
+Swagger Docs: http://127.0.0.1:8000/docs
 
 ---
 
-# Run Prediction System
+# 2. Frontend Setup
+
+cd frontend
+npm install
+npm run dev
+
+Open: http://localhost:3000
+
+---
+
+# 3. Run Tests
+
+cd c:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System
+venv\Scripts\python -m pytest tests/ -v
+
+Expected: 15 tests passed.
+
+---
+
+# 4. Standalone CLI Prediction
 
 python preprocessing/predict.py
 
----
-
-# Run FastAPI Backend
-
-uvicorn backend.main:app --reload
+(interactive — enter an image path, type "exit" to quit)
 
 ---
 
-# FastAPI Swagger Docs
+# Detection Pipeline Overview
 
-http://127.0.0.1:8000/docs
+The /predict endpoint runs two independent stages and
+combines them into a final verdict:
+
+  Stage 1 — MobileNetV2 classifier (224x224, sigmoid)
+    output: model_verdict (REAL/FAKE), model_confidence
+
+  Stage 2 — Forensic checks (OpenCV + Tesseract):
+    - UV light feature detection
+    - Watermark gradient
+    - OCR serial number
+    - Gandhi face (Haar cascade)
+    - Security thread (Hough lines)
+    - Hologram (hue/saturation variance)
+    - Denomination OCR
+    output: forensic_score (% of checks that passed)
+
+  Combined verdict:
+    score   = 0.5 * model + 0.5 * forensic
+    REAL    if score >= 0.70 AND forensic >= 0.50
+    FAKE    if score <  0.35 OR (model FAKE AND forensic < 0.40)
+    else SUSPICIOUS
 
 ---
 
-# Generate Requirements File
+# Git Workflow
 
-pip freeze > requirements.txt
-
----
-
-# Git Commands
-
-## Initialize Git
-
-git init
-
-## Add Files
-
+git status
 git add .
-
-## Commit Changes
-
 git commit -m "your message"
-
-## Push Code
-
 git push
-
----
-
-# Important Packages
-
-pip install tensorflow
-pip install opencv-python
-pip install numpy
-pip install matplotlib
-pip install scikit-learn
-pip install fastapi
-pip install uvicorn
-pip install python-multipart
-
----
-
-# Jupyter Notebook
-
-jupyter notebook
-
----
-
-# Project Structure
-
-backend/
-preprocessing/
-models/
-notebooks/
-dataset/
-docs/
-
----
-
----
-
-# Remove Large Files From Git Tracking
-
-git rm -r --cached dataset
-
-git rm -r --cached venv
-
-git rm -r --cached .ipynb_checkpoints
 
 ---
 
@@ -109,5 +128,37 @@ dataset/
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
+node_modules/
+.next/
+.pytest_cache/
+*.keras
+backend/*.jpg
+
+---
+
+# Troubleshooting
+
+## "Cannot find module fastapi" in VSCode
+
+VSCode is pointed at system Python, not the venv. Press
+Ctrl+Shift+P → "Python: Select Interpreter" → pick:
+.\venv\Scripts\python.exe
+
+## "PSSecurityException" when running npm
+
+PowerShell execution policy is blocking scripts. Either run
+npm via Git Bash, or run once in admin PowerShell:
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+## OCR returns "Tesseract OCR engine not installed"
+
+Install via the winget command in section 0. The backend
+falls back gracefully if it's missing — OCR-dependent
+checks become INFO instead of PASS/FAIL.
+
+## Port 8000 already in use
+
+netstat -ano | findstr :8000
+taskkill /F /PID <pid> /T
 
 ---

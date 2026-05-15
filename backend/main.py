@@ -9,7 +9,8 @@ from PIL import Image
 
 import io
 import os
-import webbrowser
+
+from backend.forensic import run_forensic_pipeline
 
 # =====================================================
 # FASTAPI APP
@@ -72,42 +73,6 @@ def home():
     }
 
 # =====================================================
-# IMAGE PREPROCESSING
-# =====================================================
-
-def preprocess_image(image_bytes):
-
-    # Convert image bytes to PIL image
-
-    image = Image.open(
-        io.BytesIO(image_bytes)
-    ).convert("RGB")
-
-    # Convert image to numpy array
-
-    image = np.array(image)
-
-    # Resize image
-
-    image = cv2.resize(
-        image,
-        (224, 224)
-    )
-
-    # Normalize image
-
-    image = image / 255.0
-
-    # Add batch dimension
-
-    image = np.expand_dims(
-        image,
-        axis=0
-    )
-
-    return image
-
-# =====================================================
 # PREDICT CURRENCY
 # =====================================================
 
@@ -118,26 +83,38 @@ async def predict_currency(
 
     try:
 
-        # Read uploaded image
-
         image_bytes = await file.read()
 
-        # Preprocess image
+        # Decode once into a BGR cv2 image (used for forensic
+        # pipeline at original resolution) and a 224x224 tensor
+        # (used for the MobileNetV2 classifier).
 
-        processed_image = preprocess_image(
-            image_bytes
+        pil_image = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGB")
+
+        rgb_array = np.array(pil_image)
+
+        bgr_image = cv2.cvtColor(
+            rgb_array,
+            cv2.COLOR_RGB2BGR
         )
+
+        # Model input
+
+        model_input = cv2.resize(
+            rgb_array,
+            (224, 224)
+        ) / 255.0
+
+        model_input = np.expand_dims(model_input, axis=0)
 
         print(
             "Processed Shape:",
-            processed_image.shape
+            model_input.shape
         )
 
-        # Predict
-
-        prediction = model.predict(
-            processed_image
-        )[0][0]
+        prediction = model.predict(model_input)[0][0]
 
         print(
             "Raw Prediction:",
@@ -145,57 +122,67 @@ async def predict_currency(
         )
 
         # =============================================
-        # PREDICTION LOGIC
+        # MODEL VERDICT (raw ML output)
         # =============================================
 
         if prediction >= 0.5:
-
-            result = "REAL"
-
-            confidence = round(
-                prediction * 100,
-                2
-            )
-
+            model_verdict = "REAL"
+            model_confidence = round(prediction * 100, 2)
         else:
-
-            result = "FAKE"
-
-            confidence = round(
-                (1 - prediction) * 100,
-                2
-            )
+            model_verdict = "FAKE"
+            model_confidence = round((1 - prediction) * 100, 2)
 
         # =============================================
-        # FEATURE PLACEHOLDERS
+        # FORENSIC PIPELINE
         # =============================================
 
-        forensic_analysis = {
+        forensic_analysis = run_forensic_pipeline(bgr_image)
 
-            "uv_light_detection":
-            "Pending",
+        # =============================================
+        # COMBINED VERDICT
+        # =============================================
+        # Aggregate forensic checks. The model alone has
+        # ~97% val accuracy on its training distribution
+        # but is brittle on out-of-distribution photos,
+        # so we cross-check against the forensic features.
 
-            "watermark_detection":
-            "Pending",
+        scored_checks = [
+            c for k, c in forensic_analysis.items()
+            if k != "modular_ai_pipeline"
+            and c["status"] in ("PASS", "FAIL")
+        ]
 
-            "ocr_serial_number":
-            "Pending",
+        pass_count = sum(
+            1 for c in scored_checks if c["status"] == "PASS"
+        )
 
-            "gandhi_face_analysis":
-            "Pending",
+        total = max(len(scored_checks), 1)
 
-            "security_thread_detection":
-            "Pending",
+        forensic_score = pass_count / total
 
-            "hologram_detection":
-            "Pending",
+        # 50% model, 50% forensic
+        combined_score = (
+            0.5 * float(prediction) + 0.5 * forensic_score
+        )
 
-            "denomination_classification":
-            "Pending",
+        # A confident REAL verdict requires the model to
+        # agree AND at least half of the forensic checks
+        # to independently corroborate. Otherwise we degrade
+        # to SUSPICIOUS so the user can re-evaluate.
 
-            "modular_ai_pipeline":
-            "Active"
-        }
+        if combined_score >= 0.70 and forensic_score >= 0.50:
+            final_verdict = "REAL"
+        elif combined_score < 0.35 or (
+            float(prediction) < 0.5 and forensic_score < 0.40
+        ):
+            final_verdict = "FAKE"
+        else:
+            final_verdict = "SUSPICIOUS"
+
+        final_confidence = round(
+            max(combined_score, 1 - combined_score) * 100,
+            2
+        )
 
         # =============================================
         # FINAL RESPONSE
@@ -205,17 +192,23 @@ async def predict_currency(
 
             "status": "success",
 
-            "prediction":
-            result,
+            "prediction": final_verdict,
 
-            "confidence":
-            f"{confidence:.2f}%",
+            "confidence": f"{final_confidence:.2f}%",
 
-            "raw_prediction":
-            float(prediction),
+            "raw_prediction": float(prediction),
 
-            "forensic_analysis":
-            forensic_analysis
+            "model_verdict": model_verdict,
+
+            "model_confidence": f"{model_confidence:.2f}%",
+
+            "forensic_score": round(forensic_score * 100, 2),
+
+            "forensic_pass_count": pass_count,
+
+            "forensic_total_checks": total,
+
+            "forensic_analysis": forensic_analysis
         }
 
     except Exception as e:
@@ -233,10 +226,3 @@ async def predict_currency(
             str(e)
         }
 
-# =====================================================
-# AUTO OPEN SWAGGER DOCS
-# =====================================================
-
-webbrowser.open(
-    "http://127.0.0.1:8000/docs"
-)
