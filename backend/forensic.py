@@ -176,14 +176,21 @@ def _preprocess_variants(region):
     (Otsu + adaptive). CLAHE is applied first to recover
     contrast on phone-camera photos.
 
-    Returns 4 single-channel uint8 images per crop. Kept
-    deliberately small — the OCR pipeline runs each variant
-    through several PSM modes, so total Tesseract calls
-    multiply quickly."""
+    Upscaling is adaptive: small crops (e.g. from a 300px-
+    wide thumbnail) are upscaled aggressively so Tesseract
+    has enough pixel height to recognise the digits — a
+    fixed 2.5x factor leaves a 30-pixel-tall band at only
+    75px, which is below Tesseract's reliable threshold."""
 
     bgr = region
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     r_ch = bgr[:, :, 2]
+
+    h = region.shape[0]
+
+    # Target ≥ 180 pixels of vertical resolution after scaling,
+    # capped at 4.5x to avoid blowing up huge images.
+    scale = max(2.5, min(4.5, 180.0 / max(h, 1)))
 
     variants = []
 
@@ -193,7 +200,7 @@ def _preprocess_variants(region):
 
         up = cv2.resize(
             ch, None,
-            fx=2.5, fy=2.5,
+            fx=scale, fy=scale,
             interpolation=cv2.INTER_CUBIC,
         )
 
@@ -244,6 +251,48 @@ def _normalize_digits(text):
     if fixed.isdigit() and len(fixed) in (6, 7):
         return fixed
     return None
+
+
+def _serial_from_words_2letter(words):
+    """Recover serials when Tesseract reads only the 2 letters
+    of the prefix (e.g. "BM" instead of "9BM") — common on tiny
+    images where the leading digit is too small to segment.
+
+    The leading digit is reported as "?" so the user can read
+    it from the note rather than us inventing a value."""
+
+    out = []
+
+    for w in words:
+
+        digits = _normalize_digits(w["text"])
+        if digits is None:
+            continue
+
+        for p in words:
+
+            if p is w:
+                continue
+            if p["x"] >= w["x"]:
+                continue
+            if abs(p["y"] - w["y"]) > max(w["h"], 12):
+                continue
+
+            text = p["text"]
+            if len(text) != 2:
+                continue
+
+            l1 = text[0].translate(_OCR_LETTER_FIX)
+            l2 = text[1].translate(_OCR_LETTER_FIX)
+            if not (l1.isalpha() and l2.isalpha()):
+                continue
+
+            out.append({
+                "serial": f"?{l1}{l2} {digits}",
+                "conf": (p["conf"] + w["conf"]) / 2,
+            })
+
+    return out
 
 
 def _serial_from_words(words):
@@ -363,7 +412,45 @@ def _cross_variant_serials(per_crop_results):
     return out
 
 
+_TARGET_OCR_WIDTH = 1800
+
+
+def _normalise_for_ocr(image):
+    """Resize the image so its width is at least _TARGET_OCR_WIDTH.
+
+    Tiny inputs (148x341 phone-camera thumbnails) need this — at
+    native resolution Tesseract can't reliably resolve the serial
+    even after the per-variant upscale, because the crop is
+    pixel-starved before any preprocessing."""
+
+    h, w = image.shape[:2]
+
+    if w >= _TARGET_OCR_WIDTH:
+        return image
+
+    scale = _TARGET_OCR_WIDTH / w
+    return cv2.resize(
+        image, None,
+        fx=scale, fy=scale,
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+
 def extract_serial_number(image):
+    """Layout-independent serial extraction.
+
+    Strategy:
+      1. Upscale tiny inputs so Tesseract has enough pixels.
+      2. OCR the whole image and the top + bottom halves
+         across several preprocessing variants and PSM modes.
+      3. Pool every detected word into one big bag.
+      4. Score the 3-char prefix candidates and the 6-7 digit
+         candidates *independently*. The digits half is
+         usually reliable; the prefix half is what
+         Tesseract gets wrong on stylised banknote fonts.
+      5. Pair the strongest prefix with the strongest digits
+         only if the prefix has a clear lead — otherwise
+         emit "??? 123456" so we never fabricate a prefix."""
 
     if not TESSERACT_AVAILABLE:
 
@@ -373,127 +460,102 @@ def extract_serial_number(image):
             "value": None,
         }
 
-    img = _ensure_bgr(image)
-    h, w = img.shape[:2]
+    img = _normalise_for_ocr(_ensure_bgr(image))
+    h = img.shape[0]
 
-    crops = [
-        ("top",    img[int(h * 0.12):int(h * 0.32), int(w * 0.03):int(w * 0.32)]),
-        ("bottom", img[int(h * 0.78):h,             int(w * 0.55):w]),
+    regions = [
+        img,
+        img[0:int(h * 0.5), :],
+        img[int(h * 0.5):h, :],
     ]
 
-    per_crop = {"top": [], "bottom": []}
+    prefix_scores = {}
+    digit_scores = {}
 
-    for label, crop in crops:
+    for region in regions:
 
-        if crop.size == 0:
+        if region.size == 0:
             continue
 
-        per_crop_words = []
+        for variant in _preprocess_variants(region):
 
-        for variant in _preprocess_variants(crop):
+            for psm in (6, 7, 11):
 
-            for psm in (6, 7, 8, 11):
+                for w in _ocr_words(variant, psm):
 
-                words = _ocr_words(variant, psm)
-                if not words:
-                    continue
+                    text = w["text"]
 
-                per_crop_words.append(words)
-                per_crop[label].extend(_serial_from_words(words))
+                    digits = _normalize_digits(text)
+                    if digits is not None:
+                        digit_scores[digits] = (
+                            digit_scores.get(digits, 0) + w["conf"]
+                        )
+                        continue
 
-                line = " ".join(w["text"] for w in words)
-                per_crop[label].extend(_serials_from_text(line))
+                    if _PREFIX_ALNUM_3.match(text):
+                        norm = _normalize_prefix(text)
+                        if norm is not None:
+                            prefix_scores[norm] = (
+                                prefix_scores.get(norm, 0) + w["conf"]
+                            )
 
-        per_crop[label].extend(_cross_variant_serials(per_crop_words))
+    if not digit_scores:
 
-    top_set = {c["serial"] for c in per_crop["top"]}
-    bot_set = {c["serial"] for c in per_crop["bottom"]}
+        return {
+            "status": "FAIL",
+            "details": "No serial digit sequence detected",
+            "value": None,
+        }
 
-    # Highest confidence path: same serial detected in BOTH
-    # the top-left and bottom-right crops.
-    cross_agreed = sorted(top_set & bot_set)
+    ranked_digits = sorted(
+        digit_scores.items(), key=lambda kv: kv[1], reverse=True
+    )
+    best_digits, best_digits_score = ranked_digits[0]
 
-    if cross_agreed:
+    if best_digits_score < 60:
+
+        return {
+            "status": "FAIL",
+            "details": (
+                f"Digit sequence too weak "
+                f"(top score {int(best_digits_score)})"
+            ),
+            "value": None,
+        }
+
+    if not prefix_scores:
 
         return {
             "status": "PASS",
             "details": (
-                f"Verified by both crops: "
-                f"{len(cross_agreed)} reading(s)"
+                f"Digits read (score {int(best_digits_score)}), "
+                f"prefix not recoverable"
             ),
-            "value": " | ".join(cross_agreed[:3]),
+            "value": f"??? {best_digits}",
         }
-
-    # Fallback: no cross-crop match. The digits portion of a
-    # serial is usually reliable (simple 0-9 shapes); the
-    # 3-character prefix is the part that gets misread on
-    # stylised banknote fonts. We vote on digits and prefix
-    # *separately* and only commit to a prefix when it has
-    # a clear lead — otherwise the user sees "??? 123456",
-    # which is more useful than confidently showing the
-    # wrong serial.
-    all_candidates = per_crop["top"] + per_crop["bottom"]
-
-    if not all_candidates:
-
-        return {
-            "status": "FAIL",
-            "details": "No serial number pattern detected",
-            "value": None,
-        }
-
-    digit_votes = {}
-    for c in all_candidates:
-        digits = c["serial"].split(" ", 1)[-1]
-        digit_votes[digits] = digit_votes.get(digits, 0) + c["conf"]
-
-    best_digits, best_digit_score = max(
-        digit_votes.items(), key=lambda kv: kv[1]
-    )
-
-    if best_digit_score < 90:
-
-        return {
-            "status": "FAIL",
-            "details": (
-                f"Reading too noisy "
-                f"(best digit score {int(best_digit_score)})"
-            ),
-            "value": None,
-        }
-
-    prefix_votes = {}
-    for c in all_candidates:
-        prefix, _, digits = c["serial"].partition(" ")
-        if digits != best_digits:
-            continue
-        prefix_votes[prefix] = prefix_votes.get(prefix, 0) + c["conf"]
 
     ranked_prefixes = sorted(
-        prefix_votes.items(), key=lambda kv: kv[1], reverse=True
+        prefix_scores.items(), key=lambda kv: kv[1], reverse=True
     )
     top_prefix, top_pscore = ranked_prefixes[0]
     runner = ranked_prefixes[1][1] if len(ranked_prefixes) > 1 else 0
 
-    if top_pscore >= runner * 1.4:
+    if top_pscore >= max(runner * 1.3, 50):
 
         return {
             "status": "PASS",
             "details": (
-                f"Single-crop reading, digits score "
-                f"{int(best_digit_score)}, prefix score "
-                f"{int(top_pscore)}"
+                f"Serial read (digits {int(best_digits_score)}, "
+                f"prefix {int(top_pscore)})"
             ),
             "value": f"{top_prefix} {best_digits}",
         }
 
-    # Prefix is ambiguous but digits are solid — surface the
-    # digits and mark the prefix as uncertain instead of
-    # confidently showing one of several candidates.
     return {
         "status": "PASS",
         "details": (
-            f"Prefix uncertain — top candidates: "
+            f"Digits clear ({int(best_digits_score)}), "
+            f"prefix ambiguous: "
             f"{', '.join(p for p, _ in ranked_prefixes[:3])}"
         ),
         "value": f"??? {best_digits}",
@@ -842,6 +904,92 @@ _KNOWN_DENOMINATIONS = {
     "10", "20", "50", "100", "200", "500", "2000"
 }
 
+# Common OCR misreads of the leading digit. The ₹ symbol is
+# rendered as a curly shape immediately before the digit and
+# Tesseract often glues them together — e.g. "₹500" reads as
+# "9500", or the "₹5" gets fused into a single "9" glyph and
+# the trailing "00" is read independently, yielding "900".
+# We accept these near-misses by trying both the original
+# token and a version with the leading digit remapped.
+_DENOM_LEADING_FIX = {
+    "9": ["5", "2", "1"],   # ₹ -> 9 confusion; resolves to 5/2/1
+    "8": ["5"],             # ₹ symbol can also map to 8
+    "4": ["1"],             # 4 -> 1 misread in some fonts
+    "6": ["5"],             # tail of ₹ stroke
+}
+
+
+def _denom_candidates(token):
+    """Yield all plausible denominations for an OCR token.
+
+    Includes the literal token, the digit-confusion fix, and
+    any leading-digit remappings that produce a known
+    denomination value."""
+
+    if not token:
+        return
+
+    fixed = token.translate(_OCR_DIGIT_FIX)
+    if not fixed.isdigit():
+        return
+
+    if fixed in _KNOWN_DENOMINATIONS:
+        yield fixed
+
+    if not fixed:
+        return
+
+    head = fixed[0]
+    tail = fixed[1:]
+
+    for repl in _DENOM_LEADING_FIX.get(head, ()):
+        alt = repl + tail
+        if alt in _KNOWN_DENOMINATIONS:
+            yield alt
+
+
+# Approximate dominant (hue, sat) range per denomination for
+# the Mahatma Gandhi New Series. OpenCV hue is 0-179, sat
+# is 0-255. The saturation bound is what splits Rs 200
+# (high-sat yellow) from Rs 500 (low-sat stone) — both sit
+# around the same hue.
+_DENOM_PALETTE = {
+    # denom : (hue_lo, hue_hi, sat_lo, sat_hi)
+    "10":   (5,   22,   30, 200),  # chocolate brown
+    "20":   (35,  65,   60, 255),  # yellow-green
+    "50":   (85,  105,  40, 255),  # cyan / blue
+    "100":  (115, 145,  30, 200),  # lavender
+    "200":  (15,  40,   90, 255),  # bright yellow
+    "500":  (15,  55,    0,  80),  # stone / olive (low sat)
+    "2000": (155, 179,  50, 255),  # magenta
+}
+
+
+def _palette_match(image, denom):
+    """Return True if the dominant note (hue, sat) is
+    consistent with the given denomination's palette."""
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h = hsv[:, :, 0]
+    s = hsv[:, :, 1]
+
+    # Sample only on coloured pixels (sat > 25) so the white
+    # margin of phone photos doesn't dominate the median.
+    mask = s > 25
+    if mask.sum() < 200:
+        # Mostly desaturated — fits only Rs 500 (stone) or
+        # the deep brown Rs 10.
+        return denom in {"500", "10"}
+
+    median_hue = float(np.median(h[mask]))
+    median_sat = float(np.median(s[mask]))
+
+    lo_h, hi_h, lo_s, hi_s = _DENOM_PALETTE.get(
+        denom, (0, 179, 0, 255)
+    )
+
+    return (lo_h <= median_hue <= hi_h) and (lo_s <= median_sat <= hi_s)
+
 
 def classify_denomination(image):
 
@@ -853,16 +1001,18 @@ def classify_denomination(image):
             "value": None
         }
 
-    img = _ensure_bgr(image)
+    img = _normalise_for_ocr(_ensure_bgr(image))
     h, w = img.shape[:2]
 
-    # On both Mahatma Gandhi New Series and the older series
-    # the denomination numeral lives near the corners of the
-    # note. We scan all four corners and reject small digit
-    # tokens (years like "2018", small text) by requiring the
-    # token to be visually prominent — at least 20% of the
-    # corner-crop height.
+    # Scan the whole image plus the four corners. Whole-image
+    # OCR catches the denomination wherever it sits (works on
+    # both Mahatma Gandhi New Series and older series, both
+    # obverse and reverse). Corner crops give cross-region
+    # voting. Small input images get a global upscale via
+    # _normalise_for_ocr so the digit tokens are large enough
+    # for Tesseract.
     corners = [
+        ("whole",        img),
         ("top-left",     img[0:int(h * 0.30),         0:int(w * 0.30)]),
         ("top-right",    img[0:int(h * 0.30),         int(w * 0.65):w]),
         ("bottom-left",  img[int(h * 0.65):h,         0:int(w * 0.30)]),
@@ -874,16 +1024,32 @@ def classify_denomination(image):
     # reverse) is dominated by a high-confidence "200" at
     # conf 95 in another corner, even though both pass the
     # height filter.
-    score_by_denom = {}
+    # Two-pass scoring:
+    #   exact_score   - tokens that read as a valid denomination directly
+    #   confused_score - tokens that become a valid denomination after
+    #                    OCR confusion mapping (₹ misread as 9 etc.)
+    # Exact reads always beat confused reads, so we keep them apart
+    # and only fall back to confused candidates if no exact wins.
+    exact_score = {}
+    confused_score = {}
 
     for label, crop in corners:
 
         if crop.size == 0:
             continue
 
-        ch = crop.shape[0]
+        # Whole-image scan: denomination is typically 5-15%
+        # of image height. Corner crops: denomination should
+        # dominate the crop, so require ≥ 20% of corner-h.
+        if label == "whole":
+            min_frac = 0.05
+        else:
+            min_frac = 0.20
 
         for processed in _preprocess_variants(crop):
+
+            ph = processed.shape[0]
+            min_h_px = ph * min_frac
 
             for psm in (7, 11):
 
@@ -899,11 +1065,9 @@ def classify_denomination(image):
                 except Exception:
                     continue
 
-                min_h = ch * 2.5 * 0.20
-
                 for i in range(len(data["text"])):
                     text = data["text"][i].strip()
-                    if text not in _KNOWN_DENOMINATIONS:
+                    if not text:
                         continue
                     try:
                         conf = int(float(data["conf"][i]))
@@ -911,12 +1075,36 @@ def classify_denomination(image):
                         continue
                     if conf < 40:
                         continue
-                    if int(data["height"][i]) < min_h:
+                    if int(data["height"][i]) < min_h_px:
                         continue
 
-                    score_by_denom[text] = (
-                        score_by_denom.get(text, 0) + conf
-                    )
+                    candidates = list(_denom_candidates(text))
+                    if not candidates:
+                        continue
+
+                    # First candidate is the exact read; the
+                    # rest come from OCR-confusion remapping.
+                    head = candidates[0]
+                    if head == text:
+                        exact_score[head] = (
+                            exact_score.get(head, 0) + conf
+                        )
+                        rest = candidates[1:]
+                    else:
+                        rest = candidates
+
+                    for alt in rest:
+                        # Only credit confusion-remaps when
+                        # the colour palette is consistent —
+                        # otherwise "900" on a Rs 100 lavender
+                        # note could wrongly resolve to 500.
+                        if not _palette_match(img, alt):
+                            continue
+                        confused_score[alt] = (
+                            confused_score.get(alt, 0) + conf * 0.7
+                        )
+
+    score_by_denom = exact_score if exact_score else confused_score
 
     if not score_by_denom:
 
