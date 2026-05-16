@@ -81,26 +81,28 @@ def _to_gray(image):
 # =====================================================
 # 1. OCR SERIAL NUMBER
 # =====================================================
-# Indian banknotes carry two serial numbers (top-left
-# small font, bottom-right larger font). The pattern is
-# typically 3 letters + space + 6 or 7 digits, e.g.
-# "0AB 123456" or "5AA 765432".
-
-# Indian banknote serials are 1 digit + 2 letters + 6 digits,
-# e.g. "5CT 199410". Prefix structure (digit-letter-letter) is
-# strict to avoid accepting things like "756 903804" where a
-# misread "5KA" got swallowed by an overly permissive class.
-# OCR confusions are then normalized: 0/O, 1/I, 5/S, 8/B in
-# digit slots, and the reverse in letter slots.
-SERIAL_REGEX = re.compile(
-    r"([0-9OISB])([A-Z08])([A-Z08])\s*([0-9OISB]{6,7})"
-)
+# Indian banknotes carry two serial numbers — small font
+# top-left and larger font bottom-right. Format is normally
+# 1 digit + 2 uppercase letters + space + 6-7 digits, e.g.
+# "5CT 199410". RBI specimens use all-digit or "0AA" prefix.
+#
+# We use Tesseract's word-level output (image_to_data) which
+# returns text + confidence + bounding box per token.  We try
+# multiple binarisations across the grayscale, red and blue
+# channels (helps the magenta Rs 2000 note where the green
+# channel kills contrast), then match adjacent <prefix><digits>
+# token pairs on the same line.
 
 _OCR_DIGIT_FIX = str.maketrans({"O": "0", "I": "1", "S": "5", "B": "8"})
-_OCR_LETTER_FIX = str.maketrans({"0": "O", "8": "B"})
+_OCR_LETTER_FIX = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+_DIGITS_ONLY = re.compile(r"^[0-9OISB]{6,7}$")
+_PREFIX_ALNUM_3 = re.compile(r"^[A-Z0-9]{3}$")
+_FULL_SERIAL_NO_SPACE = re.compile(r"([A-Z0-9]{3})([0-9OISB]{6,7})")
 
 
 def _ocr_region(region, psm=7):
+    """Backwards-compatible plain-text OCR (used by diagnostics)."""
 
     if not TESSERACT_AVAILABLE:
         return ""
@@ -112,66 +114,242 @@ def _ocr_region(region, psm=7):
     )
 
     try:
-        text = pytesseract.image_to_string(
-            region,
-            config=config
-        )
+        text = pytesseract.image_to_string(region, config=config)
     except Exception:
         return ""
 
     return text.strip().replace("\n", " ")
 
 
+def _ocr_words(region, psm):
+    """Word-level OCR. Returns list of {text, conf, x, y, h}."""
+
+    if not TESSERACT_AVAILABLE:
+        return []
+
+    config = (
+        f"--oem 3 --psm {psm} "
+        "-c tessedit_char_whitelist="
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+    )
+
+    try:
+        data = pytesseract.image_to_data(
+            region,
+            config=config,
+            output_type=pytesseract.Output.DICT,
+        )
+    except Exception:
+        return []
+
+    out = []
+    n = len(data["text"])
+    for i in range(n):
+        text = data["text"][i].strip()
+        if not text:
+            continue
+        try:
+            conf = int(float(data["conf"][i]))
+        except (TypeError, ValueError):
+            continue
+        if conf < 30:
+            continue
+        out.append({
+            "text": text,
+            "conf": conf,
+            "x": int(data["left"][i]),
+            "y": int(data["top"][i]),
+            "h": int(data["height"][i]),
+        })
+    return out
+
+
 def _preprocess_variants(region):
-    """Return several binarized versions so OCR gets multiple shots."""
+    """Yield binarised single-channel variants for OCR.
 
-    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    Returns a list of images. Used by both the new word-level
+    extractor and the diagnostic harness."""
 
-    gray = cv2.resize(
-        gray,
-        None,
-        fx=2.5,
-        fy=2.5,
-        interpolation=cv2.INTER_CUBIC
-    )
+    bgr = region
+    b_ch, g_ch, r_ch = cv2.split(bgr)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
-    gray = cv2.bilateralFilter(gray, 9, 75, 75)
+    variants = []
 
-    _, otsu = cv2.threshold(
-        gray, 0, 255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
+    # Grayscale + red + blue (skip green — kills contrast on
+    # the magenta Rs 2000 note).
+    for ch in (gray, r_ch, b_ch):
 
-    _, otsu_inv = cv2.threshold(
-        gray, 0, 255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
+        up = cv2.resize(
+            ch, None,
+            fx=2.5, fy=2.5,
+            interpolation=cv2.INTER_CUBIC,
+        )
 
-    adaptive = cv2.adaptiveThreshold(
-        gray, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31, 10
-    )
+        up = cv2.bilateralFilter(up, 9, 75, 75)
 
-    return [otsu, otsu_inv, adaptive]
+        _, otsu = cv2.threshold(
+            up, 0, 255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )
+
+        adapt = cv2.adaptiveThreshold(
+            up, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31, 10,
+        )
+
+        variants.extend([otsu, adapt])
+
+    return variants
 
 
-def _normalize_serial(d1, l1, l2, digits):
-    """Fix OCR digit/letter confusions per-slot.
+def _normalize_prefix(prefix):
+    """Return a clean 3-char prefix or None.
 
-    Slot 1 must be a digit; slot 2/3 must be letters; tail must be digits.
-    """
+    Accepts either real-serial format (digit + letter + letter)
+    or specimen-format (all digits)."""
 
-    d1 = d1.translate(_OCR_DIGIT_FIX)
-    l1 = l1.translate(_OCR_LETTER_FIX)
-    l2 = l2.translate(_OCR_LETTER_FIX)
-    digits = digits.translate(_OCR_DIGIT_FIX)
-
-    if not (d1.isdigit() and l1.isalpha() and l2.isalpha() and digits.isdigit()):
+    if len(prefix) != 3:
         return None
 
-    return f"{d1}{l1}{l2} {digits}"
+    d1 = prefix[0].translate(_OCR_DIGIT_FIX)
+    l1 = prefix[1].translate(_OCR_LETTER_FIX)
+    l2 = prefix[2].translate(_OCR_LETTER_FIX)
+
+    if d1.isdigit() and l1.isalpha() and l2.isalpha():
+        return f"{d1}{l1}{l2}"
+
+    all_d = prefix.translate(_OCR_DIGIT_FIX)
+    if all_d.isdigit():
+        return all_d
+
+    return None
+
+
+def _normalize_digits(text):
+    fixed = text.translate(_OCR_DIGIT_FIX)
+    if fixed.isdigit() and len(fixed) in (6, 7):
+        return fixed
+    return None
+
+
+def _serial_from_words(words):
+    """Find serial-shaped (prefix+digits) pairs in word list."""
+
+    out = []
+
+    # Two-token form: <prefix> <digits>  on roughly the same line
+    for w in words:
+
+        digits = _normalize_digits(w["text"])
+        if digits is None:
+            continue
+
+        for p in words:
+
+            if p is w:
+                continue
+            if p["x"] >= w["x"]:
+                continue  # prefix must be left of digits
+            if abs(p["y"] - w["y"]) > max(w["h"], 12):
+                continue
+            if not _PREFIX_ALNUM_3.match(p["text"]):
+                continue
+
+            prefix = _normalize_prefix(p["text"])
+            if prefix is None:
+                continue
+
+            out.append({
+                "serial": f"{prefix} {digits}",
+                "conf": (p["conf"] + w["conf"]) / 2,
+            })
+
+    # Single-token form: "0AA000000" with no space
+    for w in words:
+
+        m = _FULL_SERIAL_NO_SPACE.match(w["text"])
+        if not m:
+            continue
+
+        prefix = _normalize_prefix(m.group(1))
+        digits = _normalize_digits(m.group(2))
+        if prefix is None or digits is None:
+            continue
+
+        out.append({
+            "serial": f"{prefix} {digits}",
+            "conf": w["conf"],
+        })
+
+    return out
+
+
+# Looser regex over the full OCR string. Catches the case
+# where image_to_data segments prefix and digits into
+# unrelated runs but they still appear in the line text.
+_SERIAL_TEXT_REGEX = re.compile(
+    r"([A-Z0-9OISB]{3})\s?([0-9OISB]{6,7})"
+)
+
+
+def _serials_from_text(text):
+
+    out = []
+
+    for m in _SERIAL_TEXT_REGEX.finditer(text):
+
+        prefix = _normalize_prefix(m.group(1))
+        digits = _normalize_digits(m.group(2))
+
+        if prefix is None or digits is None:
+            continue
+
+        out.append({"serial": f"{prefix} {digits}", "conf": 50})
+
+    return out
+
+
+def _cross_variant_serials(per_crop_results):
+    """Combine prefix from one variant with digits from another
+    within the same crop, when they line up vertically."""
+
+    out = []
+
+    for words in per_crop_results:
+
+        prefixes = [
+            w for w in words
+            if _PREFIX_ALNUM_3.match(w["text"])
+            and _normalize_prefix(w["text"]) is not None
+        ]
+        digit_tokens = [
+            w for w in words
+            if _normalize_digits(w["text"]) is not None
+        ]
+
+        for p in prefixes:
+            for d in digit_tokens:
+                if p["x"] >= d["x"]:
+                    continue
+                # Tolerate vertical offset since they come from
+                # different binarisations of the same crop.
+                if abs(p["y"] - d["y"]) > max(p["h"], d["h"]) * 1.5:
+                    continue
+
+                prefix = _normalize_prefix(p["text"])
+                digits = _normalize_digits(d["text"])
+                if prefix is None or digits is None:
+                    continue
+
+                out.append({
+                    "serial": f"{prefix} {digits}",
+                    "conf": (p["conf"] + d["conf"]) / 2,
+                })
+
+    return out
 
 
 def extract_serial_number(image):
@@ -181,65 +359,69 @@ def extract_serial_number(image):
         return {
             "status": "INFO",
             "details": "Tesseract OCR engine not installed",
-            "value": None
+            "value": None,
         }
 
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
 
-    # Tight crops aimed at the two serial locations.
-    # Top-left: smaller font, sits in the upper-left corner.
-    # Bottom-right: larger font, sits along the bottom edge.
     crops = [
         img[int(h * 0.12):int(h * 0.32), int(w * 0.03):int(w * 0.32)],
         img[int(h * 0.78):h,             int(w * 0.55):w],
     ]
 
-    candidates = []
+    all_candidates = []
 
     for crop in crops:
 
         if crop.size == 0:
             continue
 
-        for processed in _preprocess_variants(crop):
+        per_crop_words = []
 
-            for psm in (7, 6, 8):
+        for variant in _preprocess_variants(crop):
 
-                text = _ocr_region(processed, psm=psm)
+            for psm in (6, 7, 8, 11):
 
-                for match in SERIAL_REGEX.finditer(text):
+                # Word-level OCR with confidence.
+                words = _ocr_words(variant, psm)
+                if words:
+                    per_crop_words.append(words)
+                    all_candidates.extend(_serial_from_words(words))
 
-                    serial = _normalize_serial(
-                        match.group(1),
-                        match.group(2),
-                        match.group(3),
-                        match.group(4)
-                    )
+                # Text-level OCR with regex over the line.
+                text = _ocr_region(variant, psm=psm)
+                if text:
+                    all_candidates.extend(_serials_from_text(text))
 
-                    if serial is not None:
-                        candidates.append(serial)
+        # Cross-variant pairing within this single crop, in
+        # case prefix and digits were segmented into separate
+        # runs of image_to_data but actually sit next to each
+        # other on the note.
+        all_candidates.extend(_cross_variant_serials(per_crop_words))
 
-    if not candidates:
+    if not all_candidates:
 
         return {
             "status": "FAIL",
             "details": "No serial number pattern detected",
-            "value": None
+            "value": None,
         }
 
-    # Pick the most frequently seen reading (vote across variants/PSMs).
-    seen = {}
-    for c in candidates:
-        seen[c] = seen.get(c, 0) + 1
+    votes = {}
+    for c in all_candidates:
+        votes[c["serial"]] = votes.get(c["serial"], 0) + c["conf"]
 
-    ranked = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)
+    ranked = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
     top = [s for s, _ in ranked[:3]]
 
     return {
         "status": "PASS",
-        "details": f"Detected {len(seen)} unique serial candidate(s)",
-        "value": " | ".join(top)
+        "details": (
+            f"Detected {len(votes)} unique reading(s) "
+            f"(top score {int(ranked[0][1])})"
+        ),
+        "value": " | ".join(top),
     }
 
 

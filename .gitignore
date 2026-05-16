@@ -20,3 +20,4 @@ out/
 # Backend debug crops
 backend/*.jpg
 tests/diagnostic_report.json
+tests/ocr_debug/
