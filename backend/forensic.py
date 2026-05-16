@@ -164,21 +164,32 @@ def _ocr_words(region, psm):
     return out
 
 
+_CLAHE = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+
+
 def _preprocess_variants(region):
     """Yield binarised single-channel variants for OCR.
 
-    Returns a list of images. Used by both the new word-level
-    extractor and the diagnostic harness."""
+    Two channels (gray + red — green is skipped because the
+    magenta Rs 2000 ink disappears in it; blue rarely adds
+    information beyond gray) and two binarisations each
+    (Otsu + adaptive). CLAHE is applied first to recover
+    contrast on phone-camera photos.
+
+    Returns 4 single-channel uint8 images per crop. Kept
+    deliberately small — the OCR pipeline runs each variant
+    through several PSM modes, so total Tesseract calls
+    multiply quickly."""
 
     bgr = region
-    b_ch, g_ch, r_ch = cv2.split(bgr)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    r_ch = bgr[:, :, 2]
 
     variants = []
 
-    # Grayscale + red + blue (skip green — kills contrast on
-    # the magenta Rs 2000 note).
-    for ch in (gray, r_ch, b_ch):
+    for ch in (gray, r_ch):
+
+        ch = _CLAHE.apply(ch)
 
         up = cv2.resize(
             ch, None,
@@ -366,13 +377,13 @@ def extract_serial_number(image):
     h, w = img.shape[:2]
 
     crops = [
-        img[int(h * 0.12):int(h * 0.32), int(w * 0.03):int(w * 0.32)],
-        img[int(h * 0.78):h,             int(w * 0.55):w],
+        ("top",    img[int(h * 0.12):int(h * 0.32), int(w * 0.03):int(w * 0.32)]),
+        ("bottom", img[int(h * 0.78):h,             int(w * 0.55):w]),
     ]
 
-    all_candidates = []
+    per_crop = {"top": [], "bottom": []}
 
-    for crop in crops:
+    for label, crop in crops:
 
         if crop.size == 0:
             continue
@@ -383,22 +394,45 @@ def extract_serial_number(image):
 
             for psm in (6, 7, 8, 11):
 
-                # Word-level OCR with confidence.
                 words = _ocr_words(variant, psm)
-                if words:
-                    per_crop_words.append(words)
-                    all_candidates.extend(_serial_from_words(words))
+                if not words:
+                    continue
 
-                # Text-level OCR with regex over the line.
-                text = _ocr_region(variant, psm=psm)
-                if text:
-                    all_candidates.extend(_serials_from_text(text))
+                per_crop_words.append(words)
+                per_crop[label].extend(_serial_from_words(words))
 
-        # Cross-variant pairing within this single crop, in
-        # case prefix and digits were segmented into separate
-        # runs of image_to_data but actually sit next to each
-        # other on the note.
-        all_candidates.extend(_cross_variant_serials(per_crop_words))
+                line = " ".join(w["text"] for w in words)
+                per_crop[label].extend(_serials_from_text(line))
+
+        per_crop[label].extend(_cross_variant_serials(per_crop_words))
+
+    top_set = {c["serial"] for c in per_crop["top"]}
+    bot_set = {c["serial"] for c in per_crop["bottom"]}
+
+    # Highest confidence path: same serial detected in BOTH
+    # the top-left and bottom-right crops.
+    cross_agreed = sorted(top_set & bot_set)
+
+    if cross_agreed:
+
+        return {
+            "status": "PASS",
+            "details": (
+                f"Verified by both crops: "
+                f"{len(cross_agreed)} reading(s)"
+            ),
+            "value": " | ".join(cross_agreed[:3]),
+        }
+
+    # Fallback: no cross-crop match. The digits portion of a
+    # serial is usually reliable (simple 0-9 shapes); the
+    # 3-character prefix is the part that gets misread on
+    # stylised banknote fonts. We vote on digits and prefix
+    # *separately* and only commit to a prefix when it has
+    # a clear lead — otherwise the user sees "??? 123456",
+    # which is more useful than confidently showing the
+    # wrong serial.
+    all_candidates = per_crop["top"] + per_crop["bottom"]
 
     if not all_candidates:
 
@@ -408,20 +442,61 @@ def extract_serial_number(image):
             "value": None,
         }
 
-    votes = {}
+    digit_votes = {}
     for c in all_candidates:
-        votes[c["serial"]] = votes.get(c["serial"], 0) + c["conf"]
+        digits = c["serial"].split(" ", 1)[-1]
+        digit_votes[digits] = digit_votes.get(digits, 0) + c["conf"]
 
-    ranked = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
-    top = [s for s, _ in ranked[:3]]
+    best_digits, best_digit_score = max(
+        digit_votes.items(), key=lambda kv: kv[1]
+    )
 
+    if best_digit_score < 90:
+
+        return {
+            "status": "FAIL",
+            "details": (
+                f"Reading too noisy "
+                f"(best digit score {int(best_digit_score)})"
+            ),
+            "value": None,
+        }
+
+    prefix_votes = {}
+    for c in all_candidates:
+        prefix, _, digits = c["serial"].partition(" ")
+        if digits != best_digits:
+            continue
+        prefix_votes[prefix] = prefix_votes.get(prefix, 0) + c["conf"]
+
+    ranked_prefixes = sorted(
+        prefix_votes.items(), key=lambda kv: kv[1], reverse=True
+    )
+    top_prefix, top_pscore = ranked_prefixes[0]
+    runner = ranked_prefixes[1][1] if len(ranked_prefixes) > 1 else 0
+
+    if top_pscore >= runner * 1.4:
+
+        return {
+            "status": "PASS",
+            "details": (
+                f"Single-crop reading, digits score "
+                f"{int(best_digit_score)}, prefix score "
+                f"{int(top_pscore)}"
+            ),
+            "value": f"{top_prefix} {best_digits}",
+        }
+
+    # Prefix is ambiguous but digits are solid — surface the
+    # digits and mark the prefix as uncertain instead of
+    # confidently showing one of several candidates.
     return {
         "status": "PASS",
         "details": (
-            f"Detected {len(votes)} unique reading(s) "
-            f"(top score {int(ranked[0][1])})"
+            f"Prefix uncertain — top candidates: "
+            f"{', '.join(p for p, _ in ranked_prefixes[:3])}"
         ),
-        "value": " | ".join(top),
+        "value": f"??? {best_digits}",
     }
 
 
@@ -781,41 +856,69 @@ def classify_denomination(image):
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
 
-    # Denomination digits appear top-right and bottom-right
-    crops = [
-        img[int(h * 0.05):int(h * 0.40), int(w * 0.60):w],
-        img[int(h * 0.55):int(h * 0.95), int(w * 0.60):w],
+    # On both Mahatma Gandhi New Series and the older series
+    # the denomination numeral lives near the corners of the
+    # note. We scan all four corners and reject small digit
+    # tokens (years like "2018", small text) by requiring the
+    # token to be visually prominent — at least 20% of the
+    # corner-crop height.
+    corners = [
+        ("top-left",     img[0:int(h * 0.30),         0:int(w * 0.30)]),
+        ("top-right",    img[0:int(h * 0.30),         int(w * 0.65):w]),
+        ("bottom-left",  img[int(h * 0.65):h,         0:int(w * 0.30)]),
+        ("bottom-right", img[int(h * 0.65):h,         int(w * 0.55):w]),
     ]
 
-    detected = []
+    # Vote weighted by Tesseract confidence — a one-off
+    # low-confidence misread ("500" at conf 45 on a Rs 200
+    # reverse) is dominated by a high-confidence "200" at
+    # conf 95 in another corner, even though both pass the
+    # height filter.
+    score_by_denom = {}
 
-    for crop in crops:
+    for label, crop in corners:
 
         if crop.size == 0:
             continue
 
+        ch = crop.shape[0]
+
         for processed in _preprocess_variants(crop):
 
-            for psm in (7, 6, 8):
+            for psm in (7, 11):
 
                 try:
-                    text = pytesseract.image_to_string(
+                    data = pytesseract.image_to_data(
                         processed,
                         config=(
                             f"--oem 3 --psm {psm} "
                             "-c tessedit_char_whitelist=0123456789"
-                        )
+                        ),
+                        output_type=pytesseract.Output.DICT,
                     )
                 except Exception:
                     continue
 
-                for token in re.findall(r"\d+", text):
+                min_h = ch * 2.5 * 0.20
 
-                    if token in _KNOWN_DENOMINATIONS:
+                for i in range(len(data["text"])):
+                    text = data["text"][i].strip()
+                    if text not in _KNOWN_DENOMINATIONS:
+                        continue
+                    try:
+                        conf = int(float(data["conf"][i]))
+                    except (TypeError, ValueError):
+                        continue
+                    if conf < 40:
+                        continue
+                    if int(data["height"][i]) < min_h:
+                        continue
 
-                        detected.append(token)
+                    score_by_denom[text] = (
+                        score_by_denom.get(text, 0) + conf
+                    )
 
-    if not detected:
+    if not score_by_denom:
 
         return {
             "status": "FAIL",
@@ -823,13 +926,35 @@ def classify_denomination(image):
             "value": None
         }
 
-    # Pick most frequent
-    value = max(set(detected), key=detected.count)
+    # Pick the denomination with the highest summed
+    # Tesseract confidence across all corners.
+    ranked = sorted(
+        score_by_denom.items(), key=lambda kv: kv[1], reverse=True
+    )
+    value, top_score = ranked[0]
+    runner = ranked[1][1] if len(ranked) > 1 else 0
+
+    # Demand a clear win — otherwise a low-confidence misread
+    # in one corner can tie with the real denomination.
+    if top_score < runner * 1.5 and top_score < 150:
+
+        return {
+            "status": "FAIL",
+            "details": (
+                f"Denomination ambiguous "
+                f"(top {value}:{int(top_score)} vs "
+                f"{ranked[1][0]}:{int(runner)})"
+            ),
+            "value": None,
+        }
 
     return {
         "status": "PASS",
-        "details": f"Denomination Rs. {value}",
-        "value": value
+        "details": (
+            f"Denomination Rs. {value} "
+            f"(score {int(top_score)})"
+        ),
+        "value": value,
     }
 
 
