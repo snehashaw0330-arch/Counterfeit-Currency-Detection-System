@@ -86,18 +86,27 @@ def _to_gray(image):
 # typically 3 letters + space + 6 or 7 digits, e.g.
 # "0AB 123456" or "5AA 765432".
 
+# Indian banknote serials are 1 digit + 2 letters + 6 digits,
+# e.g. "5CT 199410". Prefix structure (digit-letter-letter) is
+# strict to avoid accepting things like "756 903804" where a
+# misread "5KA" got swallowed by an overly permissive class.
+# OCR confusions are then normalized: 0/O, 1/I, 5/S, 8/B in
+# digit slots, and the reverse in letter slots.
 SERIAL_REGEX = re.compile(
-    r"\b([0-9A-Z]{1,3})\s?([0-9]{6,7})\b"
+    r"([0-9OISB])([A-Z08])([A-Z08])\s*([0-9OISB]{6,7})"
 )
 
+_OCR_DIGIT_FIX = str.maketrans({"O": "0", "I": "1", "S": "5", "B": "8"})
+_OCR_LETTER_FIX = str.maketrans({"0": "O", "8": "B"})
 
-def _ocr_region(region):
+
+def _ocr_region(region, psm=7):
 
     if not TESSERACT_AVAILABLE:
         return ""
 
     config = (
-        "--oem 3 --psm 7 "
+        f"--oem 3 --psm {psm} "
         "-c tessedit_char_whitelist="
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
     )
@@ -113,28 +122,56 @@ def _ocr_region(region):
     return text.strip().replace("\n", " ")
 
 
-def _preprocess_for_ocr(region):
+def _preprocess_variants(region):
+    """Return several binarized versions so OCR gets multiple shots."""
 
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
 
     gray = cv2.resize(
         gray,
         None,
-        fx=2.0,
-        fy=2.0,
+        fx=2.5,
+        fy=2.5,
         interpolation=cv2.INTER_CUBIC
     )
 
     gray = cv2.bilateralFilter(gray, 9, 75, 75)
 
-    _, binary = cv2.threshold(
-        gray,
-        0,
-        255,
+    _, otsu = cv2.threshold(
+        gray, 0, 255,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU
     )
 
-    return binary
+    _, otsu_inv = cv2.threshold(
+        gray, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
+
+    adaptive = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31, 10
+    )
+
+    return [otsu, otsu_inv, adaptive]
+
+
+def _normalize_serial(d1, l1, l2, digits):
+    """Fix OCR digit/letter confusions per-slot.
+
+    Slot 1 must be a digit; slot 2/3 must be letters; tail must be digits.
+    """
+
+    d1 = d1.translate(_OCR_DIGIT_FIX)
+    l1 = l1.translate(_OCR_LETTER_FIX)
+    l2 = l2.translate(_OCR_LETTER_FIX)
+    digits = digits.translate(_OCR_DIGIT_FIX)
+
+    if not (d1.isdigit() and l1.isalpha() and l2.isalpha() and digits.isdigit()):
+        return None
+
+    return f"{d1}{l1}{l2} {digits}"
 
 
 def extract_serial_number(image):
@@ -150,10 +187,12 @@ def extract_serial_number(image):
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
 
-    # Two candidate crops where serials live
+    # Tight crops aimed at the two serial locations.
+    # Top-left: smaller font, sits in the upper-left corner.
+    # Bottom-right: larger font, sits along the bottom edge.
     crops = [
-        img[0:int(h * 0.30), 0:int(w * 0.55)],
-        img[int(h * 0.55):h, int(w * 0.45):w],
+        img[int(h * 0.12):int(h * 0.32), int(w * 0.03):int(w * 0.32)],
+        img[int(h * 0.78):h,             int(w * 0.55):w],
     ]
 
     candidates = []
@@ -163,25 +202,23 @@ def extract_serial_number(image):
         if crop.size == 0:
             continue
 
-        processed = _preprocess_for_ocr(crop)
+        for processed in _preprocess_variants(crop):
 
-        text = _ocr_region(processed)
+            for psm in (7, 6, 8):
 
-        for match in SERIAL_REGEX.finditer(text):
+                text = _ocr_region(processed, psm=psm)
 
-            serial = f"{match.group(1)} {match.group(2)}"
-            candidates.append(serial)
+                for match in SERIAL_REGEX.finditer(text):
 
-    # Fallback: OCR whole image if no candidate found
-    if not candidates:
+                    serial = _normalize_serial(
+                        match.group(1),
+                        match.group(2),
+                        match.group(3),
+                        match.group(4)
+                    )
 
-        whole = _preprocess_for_ocr(img)
-        text = _ocr_region(whole)
-
-        for match in SERIAL_REGEX.finditer(text):
-
-            serial = f"{match.group(1)} {match.group(2)}"
-            candidates.append(serial)
+                    if serial is not None:
+                        candidates.append(serial)
 
     if not candidates:
 
@@ -191,18 +228,18 @@ def extract_serial_number(image):
             "value": None
         }
 
-    # Dedupe while preserving order
-    seen = set()
-    unique = []
+    # Pick the most frequently seen reading (vote across variants/PSMs).
+    seen = {}
     for c in candidates:
-        if c not in seen:
-            seen.add(c)
-            unique.append(c)
+        seen[c] = seen.get(c, 0) + 1
+
+    ranked = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)
+    top = [s for s, _ in ranked[:3]]
 
     return {
         "status": "PASS",
-        "details": f"Detected {len(unique)} serial candidate(s)",
-        "value": " | ".join(unique)
+        "details": f"Detected {len(seen)} unique serial candidate(s)",
+        "value": " | ".join(top)
     }
 
 
@@ -415,9 +452,11 @@ def detect_hologram(image):
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
 
+    # Color-shift / hologram strip sits center-right on the note,
+    # near the RBI seal and denomination numeral.
     patch = img[
-        int(h * 0.55):int(h * 0.95),
-        int(w * 0.05):int(w * 0.30)
+        int(h * 0.30):int(h * 0.80),
+        int(w * 0.60):int(w * 0.90)
     ]
 
     if patch.size == 0:
@@ -475,10 +514,10 @@ def classify_denomination(image):
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
 
-    # Denomination digits appear top-right and bottom-left
+    # Denomination digits appear top-right and bottom-right
     crops = [
-        img[0:int(h * 0.35), int(w * 0.65):w],
-        img[int(h * 0.60):h, 0:int(w * 0.35)],
+        img[int(h * 0.05):int(h * 0.40), int(w * 0.60):w],
+        img[int(h * 0.55):int(h * 0.95), int(w * 0.60):w],
     ]
 
     detected = []
@@ -488,24 +527,26 @@ def classify_denomination(image):
         if crop.size == 0:
             continue
 
-        processed = _preprocess_for_ocr(crop)
+        for processed in _preprocess_variants(crop):
 
-        try:
-            text = pytesseract.image_to_string(
-                processed,
-                config=(
-                    "--oem 3 --psm 7 "
-                    "-c tessedit_char_whitelist=0123456789"
-                )
-            )
-        except Exception:
-            continue
+            for psm in (7, 6, 8):
 
-        for token in re.findall(r"\d+", text):
+                try:
+                    text = pytesseract.image_to_string(
+                        processed,
+                        config=(
+                            f"--oem 3 --psm {psm} "
+                            "-c tessedit_char_whitelist=0123456789"
+                        )
+                    )
+                except Exception:
+                    continue
 
-            if token in _KNOWN_DENOMINATIONS:
+                for token in re.findall(r"\d+", text):
 
-                detected.append(token)
+                    if token in _KNOWN_DENOMINATIONS:
+
+                        detected.append(token)
 
     if not detected:
 

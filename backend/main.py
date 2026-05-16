@@ -170,10 +170,17 @@ async def predict_currency(
         # to independently corroborate. Otherwise we degrade
         # to SUSPICIOUS so the user can re-evaluate.
 
-        if combined_score >= 0.70 and forensic_score >= 0.50:
+        # A confident REAL needs either the model OR the forensic
+        # checks to clearly back it, not both at exactly 50/50.
+        # A confident FAKE needs the model to be strongly below 0.5
+        # AND most forensic checks to fail — otherwise we degrade to
+        # SUSPICIOUS so a borderline reading does not falsely
+        # condemn a real note.
+
+        if combined_score >= 0.65 and forensic_score >= 0.40:
             final_verdict = "REAL"
-        elif combined_score < 0.35 or (
-            float(prediction) < 0.5 and forensic_score < 0.40
+        elif combined_score < 0.30 or (
+            float(prediction) < 0.35 and forensic_score < 0.30
         ):
             final_verdict = "FAKE"
         else:
