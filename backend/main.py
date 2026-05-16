@@ -160,27 +160,47 @@ async def predict_currency(
 
         forensic_score = pass_count / total
 
-        # 50% model, 50% forensic
+        # Forensic now weighs more than the ML output. The
+        # classifier is unreliable on out-of-distribution
+        # inputs (it approves pure noise and colour-inverted
+        # notes at 95%+), so we trust the independent
+        # forensic checks more heavily.
         combined_score = (
-            0.5 * float(prediction) + 0.5 * forensic_score
+            0.4 * float(prediction) + 0.6 * forensic_score
         )
 
-        # A confident REAL verdict requires the model to
-        # agree AND at least half of the forensic checks
-        # to independently corroborate. Otherwise we degrade
-        # to SUSPICIOUS so the user can re-evaluate.
+        # Hard gate: structural_sanity FAIL means the image
+        # is not plausibly a banknote at all (blank, noise,
+        # half-cropped). Override the verdict outright.
+        sanity = forensic_analysis.get("structural_sanity", {})
+        structural_failed = sanity.get("status") == "FAIL"
 
-        # A confident REAL needs either the model OR the forensic
-        # checks to clearly back it, not both at exactly 50/50.
-        # A confident FAKE needs the model to be strongly below 0.5
-        # AND most forensic checks to fail — otherwise we degrade to
-        # SUSPICIOUS so a borderline reading does not falsely
-        # condemn a real note.
+        # The colour-richness check (kept under the legacy
+        # hologram_detection key for API stability) is a
+        # palette-integrity signal. If it fails we have a
+        # desaturated / inverted / hue-shifted print — the
+        # ML model is colour-blind so we must veto REAL here.
+        colour = forensic_analysis.get("hologram_detection", {})
+        colour_failed = colour.get("status") == "FAIL"
 
-        if combined_score >= 0.65 and forensic_score >= 0.40:
+        # A REAL verdict requires:
+        #   - structural sanity OK
+        #   - combined score >= 0.65
+        #   - at least 5 of 8 forensic checks PASS
+        #     (reverse-side notes naturally lack OCR/face/
+        #     denomination, so requiring 6 punishes them)
+        #   - colour palette intact
+
+        if structural_failed:
+            final_verdict = "FAKE"
+        elif (
+            combined_score >= 0.65
+            and pass_count >= 5
+            and not colour_failed
+        ):
             final_verdict = "REAL"
-        elif combined_score < 0.30 or (
-            float(prediction) < 0.35 and forensic_score < 0.30
+        elif combined_score < 0.35 or (
+            float(prediction) < 0.35 and forensic_score < 0.35
         ):
             final_verdict = "FAKE"
         else:

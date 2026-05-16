@@ -1,5 +1,6 @@
 """Unit tests for the forensic pipeline."""
 
+import cv2
 import numpy as np
 import pytest
 
@@ -11,6 +12,7 @@ from backend import forensic
 # =====================================================
 
 EXPECTED_KEYS = {
+    "structural_sanity",
     "uv_light_detection",
     "watermark_detection",
     "ocr_serial_number",
@@ -49,6 +51,45 @@ def test_modular_ai_pipeline_always_active(synthetic_note):
     result = forensic.run_forensic_pipeline(synthetic_note)
 
     assert result["modular_ai_pipeline"]["status"] == "PASS"
+
+
+# =====================================================
+# STRUCTURAL SANITY (new pre-flight gate)
+# =====================================================
+
+def test_structural_sanity_rejects_blank(blank_image):
+
+    # A 600x1200 grey image has zero edges → must FAIL.
+    result = forensic.structural_sanity(blank_image)
+    assert result["status"] == "FAIL"
+
+
+def test_structural_sanity_rejects_pure_noise():
+
+    rng = np.random.default_rng(0)
+    noise = rng.integers(0, 256, (600, 1200, 3), dtype=np.uint8)
+
+    result = forensic.structural_sanity(noise)
+    assert result["status"] == "FAIL"
+
+
+def test_structural_sanity_passes_synthetic_note(synthetic_note):
+
+    result = forensic.structural_sanity(synthetic_note)
+    assert result["status"] == "PASS"
+
+
+# =====================================================
+# COLOUR RICHNESS (replaces old hologram check)
+# =====================================================
+
+def test_colour_richness_rejects_desaturated(synthetic_note):
+
+    gray = cv2.cvtColor(synthetic_note, cv2.COLOR_BGR2GRAY)
+    desaturated = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    result = forensic.detect_hologram(desaturated)
+    assert result["status"] == "FAIL"
 
 
 # =====================================================

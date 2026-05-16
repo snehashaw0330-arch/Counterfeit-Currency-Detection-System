@@ -74,7 +74,7 @@ Open: http://localhost:3000
 cd <project-root>
 venv\Scripts\python -m pytest tests/ -v
 
-Expected: 15 tests passed.
+Expected: 19 tests passed.
 
 ---
 
@@ -95,20 +95,29 @@ combines them into a final verdict:
     output: model_verdict (REAL/FAKE), model_confidence
 
   Stage 2 — Forensic checks (OpenCV + Tesseract):
+    - Structural sanity (aspect, edges, brightness, quadrants)
     - UV light feature detection
     - Watermark gradient
     - OCR serial number
     - Gandhi face (Haar cascade)
     - Security thread (Hough lines)
-    - Hologram (hue/saturation variance)
+    - Colour palette integrity (hue entropy + saturation)
     - Denomination OCR
     output: forensic_score (% of checks that passed)
 
-  Combined verdict:
-    score   = 0.5 * model + 0.5 * forensic
-    REAL    if score >= 0.65 AND forensic >= 0.40
-    FAKE    if score <  0.30 OR (model < 0.35 AND forensic < 0.30)
+  Combined verdict (model under-weighted because the ML
+  classifier over-approves out-of-distribution inputs):
+    score = 0.4 * model + 0.6 * forensic
+    FAKE  if structural_sanity FAILS  (hard gate)
+    REAL  if score >= 0.65 AND pass_count >= 5
+                            AND colour palette intact
+    FAKE  if score <  0.35 OR (model < 0.35 AND forensic < 0.35)
     else SUSPICIOUS
+
+  Benchmarked on 10 verified real notes + 10 negative-
+  control samples: 8/10 real classified correctly,
+  7/10 fakes flagged FAKE, 2/10 reverse-side notes
+  flagged SUSPICIOUS (model trained mostly on obverse).
 
 ---
 

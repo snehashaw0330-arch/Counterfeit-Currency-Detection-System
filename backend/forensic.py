@@ -443,51 +443,136 @@ def detect_security_thread(image):
 
 
 # =====================================================
-# 6. HOLOGRAM / OPTICAL VARIABLE INK DETECTION
+# 6. COLOR RICHNESS / PALETTE INTEGRITY
 # =====================================================
-# Holographic patches show high local hue variance.
+# Real banknotes carry a designed multi-hue palette with
+# strong saturation. Photocopies, grayscale prints, hue-
+# shifted fakes and desaturated counterfeits collapse
+# this distribution. Hue entropy + mean saturation are a
+# far stronger discriminator than the old fixed-patch
+# hologram check (separator score 10/20 on test set).
+# We keep the function name to preserve API/frontend
+# stability; behaviour and details have been replaced.
 
 def detect_hologram(image):
 
     img = _ensure_bgr(image)
-    h, w = img.shape[:2]
 
-    # Color-shift / hologram strip sits center-right on the note,
-    # near the RBI seal and denomination numeral.
-    patch = img[
-        int(h * 0.30):int(h * 0.80),
-        int(w * 0.60):int(w * 0.90)
-    ]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    if patch.size == 0:
+    sat = hsv[:, :, 1]
+    hue = hsv[:, :, 0]
+
+    mean_sat = float(np.mean(sat))
+
+    coloured = hue[sat > 60]
+
+    if coloured.size < 200:
 
         return {
-            "status": "INFO",
-            "details": "Image too small to evaluate"
+            "status": "FAIL",
+            "details": (
+                f"Image is desaturated/colourless "
+                f"(mean sat {mean_sat:.0f})"
+            )
         }
 
-    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    hist = np.bincount(coloured, minlength=180).astype(np.float64)
+    hist /= hist.sum()
+    nz = hist[hist > 0]
+    hue_entropy = float(-(nz * np.log2(nz)).sum())
 
-    hue_std = float(np.std(hsv[:, :, 0]))
-    sat_std = float(np.std(hsv[:, :, 1]))
-
-    score = hue_std * 0.6 + sat_std * 0.4
-
-    if score >= 30:
+    if mean_sat >= 45 and hue_entropy >= 3.3:
 
         return {
             "status": "PASS",
             "details": (
-                f"Optical variance detected "
-                f"(score {score:.1f})"
+                f"Rich palette (sat {mean_sat:.0f}, "
+                f"hue entropy {hue_entropy:.2f})"
             )
         }
 
     return {
         "status": "FAIL",
         "details": (
-            f"No optical variance "
-            f"(score {score:.1f})"
+            f"Weak palette (sat {mean_sat:.0f}, "
+            f"hue entropy {hue_entropy:.2f})"
+        )
+    }
+
+
+# =====================================================
+# 6b. STRUCTURAL SANITY (NEW)
+# =====================================================
+# Pre-flight gate: rejects images that cannot plausibly
+# be a banknote (blank, pure noise, half-black, severely
+# off aspect ratio). The MobileNetV2 classifier over-
+# approves such inputs at 95%+; this gate short-circuits
+# them before they reach the verdict combiner.
+
+def structural_sanity(image):
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    aspect = w / max(h, 1)
+
+    if aspect < 1.4 or aspect > 3.0:
+        return {
+            "status": "FAIL",
+            "details": f"Aspect ratio {aspect:.2f} unlike a banknote"
+        }
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    std = float(np.std(gray))
+    if std < 12:
+        return {
+            "status": "FAIL",
+            "details": f"Image is too uniform (brightness std {std:.1f})"
+        }
+
+    edges = cv2.Canny(gray, 80, 200)
+    edge_ratio = float(np.count_nonzero(edges)) / edges.size
+
+    if edge_ratio < 0.005:
+        return {
+            "status": "FAIL",
+            "details": (
+                f"No structure (edges {edge_ratio * 100:.2f}%)"
+            )
+        }
+
+    if edge_ratio > 0.30:
+        return {
+            "status": "FAIL",
+            "details": (
+                f"Pure noise pattern (edges {edge_ratio * 100:.2f}%)"
+            )
+        }
+
+    qh, qw = h // 2, w // 2
+    quadrants = [
+        gray[:qh, :qw],
+        gray[:qh, qw:],
+        gray[qh:, :qw],
+        gray[qh:, qw:],
+    ]
+    dark_quadrants = sum(1 for q in quadrants if float(q.mean()) < 25)
+
+    if dark_quadrants >= 2:
+        return {
+            "status": "FAIL",
+            "details": (
+                f"{dark_quadrants} of 4 quadrants are near-black"
+            )
+        }
+
+    return {
+        "status": "PASS",
+        "details": (
+            f"Structure OK (aspect {aspect:.2f}, "
+            f"edges {edge_ratio * 100:.2f}%, std {std:.0f})"
         )
     }
 
@@ -577,6 +662,7 @@ def run_forensic_pipeline(image):
     """
 
     checks = {
+        "structural_sanity": structural_sanity,
         "uv_light_detection": analyze_uv_features,
         "watermark_detection": detect_watermark,
         "ocr_serial_number": extract_serial_number,

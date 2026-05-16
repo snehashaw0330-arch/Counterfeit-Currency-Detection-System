@@ -10,6 +10,7 @@ type ForensicCheck = {
 };
 
 type ForensicAnalysis = {
+  structural_sanity: ForensicCheck;
   uv_light_detection: ForensicCheck;
   watermark_detection: ForensicCheck;
   ocr_serial_number: ForensicCheck;
@@ -524,6 +525,11 @@ export default function Home() {
               ">
 
                 <FeatureCard
+                  title="Structural Sanity"
+                  check={result?.forensic_analysis?.structural_sanity}
+                />
+
+                <FeatureCard
                   title="UV Light Detection"
                   check={result?.forensic_analysis?.uv_light_detection}
                 />
@@ -549,7 +555,7 @@ export default function Home() {
                 />
 
                 <FeatureCard
-                  title="Hologram Detection"
+                  title="Colour Palette Integrity"
                   check={result?.forensic_analysis?.hologram_detection}
                 />
 
