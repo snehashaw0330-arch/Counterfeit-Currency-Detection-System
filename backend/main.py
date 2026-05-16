@@ -9,8 +9,9 @@ from PIL import Image
 
 import io
 import os
+import threading
 
-from backend.forensic import run_forensic_pipeline
+from backend.forensic import run_forensic_pipeline, warmup_ocr
 
 # =====================================================
 # FASTAPI APP
@@ -56,6 +57,33 @@ print("\nMODEL PATH:", MODEL_PATH)
 model = load_model(MODEL_PATH)
 
 print("Model Loaded Successfully\n")
+
+
+# =====================================================
+# OCR WARMUP
+# =====================================================
+# EasyOCR's first call costs ~3 s to load the detector +
+# recogniser weights. Running that in a background thread
+# at startup means the first /predict request after launch
+# doesn't pay the latency. Safe to fail silently — the
+# lazy-init path inside forensic.py still works.
+
+def _background_warmup():
+    try:
+        ok = warmup_ocr()
+        print(f"OCR Warmup: {'OK' if ok else 'unavailable, lazy fallback active'}")
+    except Exception as exc:
+        print(f"OCR Warmup raised (non-fatal): {exc}")
+
+
+@app.on_event("startup")
+def _kickoff_warmup():
+    threading.Thread(
+        target=_background_warmup,
+        name="ocr-warmup",
+        daemon=True,
+    ).start()
+
 
 # =====================================================
 # HOME ROUTE

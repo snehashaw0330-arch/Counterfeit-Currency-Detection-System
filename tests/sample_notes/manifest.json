@@ -1,0 +1,48 @@
+{
+  "_schema": {
+    "description": "Ground-truth manifest for the counterfeit-currency-detection fixture corpus. Paths are relative to tests/sample_notes/. The Phase A pytest and the diagnostic harness consume this file rather than hardcoded paths.",
+    "fields": {
+      "denom":  "10 | 20 | 50 | 100 | 200 | 500 | 2000 | null",
+      "side":   "obverse | reverse | specimen | composite | n/a",
+      "serial": "exact string e.g. '9BM 000793', or null when unknown / specimen",
+      "source": "wikipedia | user_phone | stock_photo | synthetic_derived | synthetic_fake",
+      "grade":  "clean | phone | edge_case | fake",
+      "fake_type": "structural | content_degraded (only set when grade='fake'). structural = by construction has no text (blank, noise). content_degraded = a real banknote with visual degradation; may still contain readable text.",
+      "notes":  "free-form human comment, optional"
+    }
+  },
+
+  "real/real_10_obv.jpg":   {"denom": "10",   "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_10_rev.png":   {"denom": "10",   "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_20_obv.jpg":   {"denom": "20",   "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_20_rev.jpg":   {"denom": "20",   "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_50_obv.jpg":   {"denom": "50",   "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_50_rev.jpg":   {"denom": "50",   "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_100_obv.png":  {"denom": "100",  "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean", "notes": "Mahatma Gandhi New Series 2018 (lavender)"},
+  "real/real_100_rev.png":  {"denom": "100",  "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean", "notes": "Mahatma Gandhi New Series 2018, Rani ki vav"},
+  "real/real_100_old_series_composite.jpg": {"denom": "100", "side": "composite", "serial": "6BW 070884", "source": "stock_photo", "grade": "edge_case", "notes": "Pre-2017 design, both sides in one frame, vendor watermark visible — stress test"},
+  "real/real_200_obv.jpg":  {"denom": "200",  "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_200_rev.jpg":  {"denom": "200",  "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_2000_obv.jpg": {"denom": "2000", "side": "obverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+  "real/real_2000_rev.jpg": {"denom": "2000", "side": "reverse", "serial": null, "source": "wikipedia", "grade": "clean"},
+
+  "real_phone/real_20_phone_specimen_obv.jpg":     {"denom": "20",   "side": "specimen", "serial": null,          "source": "user_phone", "grade": "phone", "notes": "RBI specimen-style layout, serial is 000 000000"},
+  "real_phone/real_50_phone_obv.jpg":              {"denom": "50",   "side": "obverse",  "serial": "1DV 708101",  "source": "user_phone", "grade": "phone", "notes": "Small tilted phone photo"},
+  "real_phone/real_100_phone_obv.jpg":             {"denom": "100",  "side": "obverse",  "serial": "7MP 979885",  "source": "user_phone", "grade": "phone", "notes": "Mahatma Gandhi New Series, real serial"},
+  "real_phone/real_100_phone_specimen_obv.jpg":    {"denom": "100",  "side": "specimen", "serial": null,          "source": "user_phone", "grade": "phone", "notes": "New series specimen, serial is 000 000000"},
+  "real_phone/real_100_phone_blurry_obv.jpg":      {"denom": "100",  "side": "obverse",  "serial": "7MP 979885",  "source": "synthetic_derived", "grade": "phone", "notes": "Motion-blurred derivative of real_100_phone_obv.jpg (9px horizontal kernel) — phone-shake stress sample. Serial likely unreadable; denomination should still classify."},
+  "real_phone/real_500_phone_obv.jpg":             {"denom": "500",  "side": "obverse",  "serial": "9BM 000793",  "source": "user_phone", "grade": "phone", "notes": "The user's canonical Tesseract-failing image"},
+  "real_phone/real_500_phone_handheld_obv.jpg":    {"denom": "500",  "side": "obverse",  "serial": "4AA 737195",  "source": "user_phone", "grade": "phone", "notes": "Full-resolution handheld with sky background, tilted — Phase B auto-crop goldmine"},
+  "real_phone/real_2000_phone_obv.jpg":            {"denom": "2000", "side": "obverse",  "serial": "3DM 401764",  "source": "user_phone", "grade": "phone", "notes": "Clean mid-res phone photo"},
+
+  "fake/fake_01_blank_black.jpg":     {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "structural"},
+  "fake/fake_02_blank_white.jpg":     {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "structural"},
+  "fake/fake_03_pure_noise.jpg":      {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "structural"},
+  "fake/fake_04_heavy_blur.jpg":      {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "Heavy blur of a real note; text may or may not be readable"},
+  "fake/fake_05_low_res.jpg":         {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "Aggressive downsample of a real note"},
+  "fake/fake_06_half_cropped.jpg":    {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "structural"},
+  "fake/fake_07_color_inverted.jpg":  {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "Real note with channels inverted; OCR can still read text"},
+  "fake/fake_08_desaturated.jpg":     {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "Real note with saturation removed; OCR can still read text"},
+  "fake/fake_09_hue_shifted.jpg":     {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "Real note with hue shifted; OCR can still read text"},
+  "fake/fake_10_user_sidebyside.jpg": {"denom": null, "side": "n/a", "serial": null, "source": "synthetic_fake", "grade": "fake", "fake_type": "content_degraded", "notes": "User side-by-side comparison image; contains real banknote content"}
+}

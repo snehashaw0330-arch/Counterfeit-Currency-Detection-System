@@ -4,7 +4,23 @@
 
 # 0. Prerequisites (one-time, system level)
 
-## Install Tesseract OCR (required for serial number + denomination reading)
+## OCR engine
+
+The primary OCR engine is **EasyOCR** (deep-learning based,
+significantly more accurate than Tesseract on Indian banknote
+fonts and the ₹ glyph). EasyOCR is a pip package — installed
+by `pip install -r requirements.txt` below.
+
+On first call, EasyOCR downloads its detector + recogniser
+weights (~64 MB total) to `%USERPROFILE%\.EasyOCR\model\`.
+The FastAPI server pre-warms the reader at startup so the
+first /predict request doesn't pay this cost.
+
+## Tesseract OCR (fallback only)
+
+Optional. If Tesseract is installed the backend uses it
+silently as a fallback when EasyOCR is unavailable. Skip
+this step unless you specifically need the fallback.
 
 ### PowerShell (Windows)
 
@@ -48,7 +64,14 @@ source venv/Scripts/activate
 ## Install backend dependencies
 
 pip install -r requirements.txt
-pip install pytesseract
+
+Notes:
+- This installs PyTorch (~500 MB) as an EasyOCR dependency.
+- First /predict request after server start triggers a one-
+  time ~64 MB model weight download. The startup warmup
+  hook does this in a background thread so server boot
+  isn't blocked, but the very first request may take 5-10 s
+  if it lands before warmup completes.
 
 ## Run backend (FastAPI + uvicorn)
 
@@ -74,7 +97,10 @@ Open: http://localhost:3000
 cd <project-root>
 venv\Scripts\python -m pytest tests/ -v
 
-Expected: 19 tests passed.
+Expected: 19 unit tests in test_forensic.py pass, plus 5
+Phase-A OCR tests in test_phase_a_ocr.py pass (the latter
+run for ~2 minutes because they exercise EasyOCR end-to-end
+against the manifest-driven fixture corpus).
 
 ---
 
@@ -161,9 +187,16 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ## OCR returns "Tesseract OCR engine not installed"
 
-Install via the winget command in section 0. The backend
-falls back gracefully if it's missing — OCR-dependent
-checks become INFO instead of PASS/FAIL.
+This message only appears when both EasyOCR AND Tesseract
+are unavailable. The primary OCR engine is now EasyOCR
+(installed via `pip install -r requirements.txt`). If you
+see this message, either:
+  - EasyOCR's PyTorch dependency failed to install — re-run
+    pip install in a clean venv, or
+  - The EasyOCR model download was blocked by the network on
+    first use — try a manual reader warmup:
+      venv\Scripts\python.exe -c "from backend.forensic import warmup_ocr; print(warmup_ocr())"
+Tesseract remains available as a silent fallback if installed.
 
 ## Port 8000 already in use
 
