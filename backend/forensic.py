@@ -722,7 +722,14 @@ def _easyocr_words(image):
         text = text.strip().upper()
         if not text:
             continue
-        if conf < 0.30:
+        # Permissive floor: specimen notes with "0AA 000000"
+        # serials and tilted phone photos can hand back the
+        # right serial token at conf 0.20-0.30. The strict
+        # regex in extract_serial_number (3 alnum + optional
+        # asterisk + 6-7 digit-like chars) does the real
+        # filtering — keeping low-conf tokens just gives it
+        # more raw material to match against.
+        if conf < 0.20:
             continue
 
         # bbox is [(x0,y0), (x1,y0), (x1,y1), (x0,y1)]
