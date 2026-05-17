@@ -36,8 +36,13 @@ _EASYOCR_READER = None
 # outside this set, so the ₹ glyph / Hindi script can't
 # pollute the candidate token bag.
 _ALNUM_SPACE = (
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 *"
 )
+# Asterisk is included because RBI marks replacement notes
+# (substituted for damaged ones in a sheet) with a * between
+# the prefix and the digits, e.g. "2DA*012720". Without it
+# in the allowlist EasyOCR substitutes 'X' for the glyph and
+# the downstream regex fails to recognise the serial.
 _DIGITS_ALLOWLIST = "0123456789"
 
 
@@ -336,12 +341,18 @@ def _locate_note(image):
 # channel kills contrast), then match adjacent <prefix><digits>
 # token pairs on the same line.
 
-_OCR_DIGIT_FIX = str.maketrans({"O": "0", "I": "1", "S": "5", "B": "8"})
+_OCR_DIGIT_FIX = str.maketrans({"O": "0", "I": "1", "J": "1", "S": "5", "B": "8"})
 _OCR_LETTER_FIX = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
 
-_DIGITS_ONLY = re.compile(r"^[0-9OISB]{6,7}$")
+_DIGITS_ONLY = re.compile(r"^[0-9OISBJ]{6,7}$")
 _PREFIX_ALNUM_3 = re.compile(r"^[A-Z0-9]{3}$")
-_FULL_SERIAL_NO_SPACE = re.compile(r"([A-Z0-9]{3})([0-9OISB]{6,7})")
+# The optional middle group captures the RBI replacement-note
+# asterisk (* between prefix and digits). Whether it matched
+# is preserved through to the formatted output so the user
+# sees exactly what is printed on the note.
+_FULL_SERIAL_NO_SPACE = re.compile(
+    r"([A-Z0-9]{3})(\*?)([0-9OISBJ]{6,7})"
+)
 
 
 def _ocr_region(region, psm=7):
@@ -570,7 +581,8 @@ def _serial_from_words(words):
                 "conf": (p["conf"] + w["conf"]) / 2,
             })
 
-    # Single-token form: "0AA000000" with no space
+    # Single-token form: "0AA000000" with no space, or
+    # "2DA*012720" for RBI replacement notes.
     for w in words:
 
         m = _FULL_SERIAL_NO_SPACE.match(w["text"])
@@ -578,12 +590,13 @@ def _serial_from_words(words):
             continue
 
         prefix = _normalize_prefix(m.group(1))
-        digits = _normalize_digits(m.group(2))
+        digits = _normalize_digits(m.group(3))
         if prefix is None or digits is None:
             continue
 
+        sep = "*" if m.group(2) else " "
         out.append({
-            "serial": f"{prefix} {digits}",
+            "serial": f"{prefix}{sep}{digits}",
             "conf": w["conf"],
         })
 
@@ -767,16 +780,18 @@ def extract_serial_number(image):
 
     # Single-bbox form: try the full serial regex against the
     # space-stripped text. Catches both "9BM 000793" and
-    # "9BM000793" coming back as one EasyOCR token.
+    # "9BM000793" coming back as one EasyOCR token, plus
+    # "2DA*012720" for RBI replacement notes.
     for w in words:
         compact = w["text"].replace(" ", "")
         m = _FULL_SERIAL_NO_SPACE.match(compact)
         if not m:
             continue
         prefix = _normalize_prefix(m.group(1))
-        digits = _normalize_digits(m.group(2))
+        digits = _normalize_digits(m.group(3))
         if prefix and digits:
-            candidates.append((f"{prefix} {digits}", w["conf"]))
+            sep = "*" if m.group(2) else " "
+            candidates.append((f"{prefix}{sep}{digits}", w["conf"]))
 
     # Two-bbox form: prefix and digits in separate tuples
     # on the same horizontal band. Existing helper does the

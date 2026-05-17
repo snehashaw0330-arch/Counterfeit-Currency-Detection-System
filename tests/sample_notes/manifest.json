@@ -28,6 +28,7 @@
 
   "real_phone/real_20_phone_specimen_obv.jpg":     {"denom": "20",   "side": "specimen", "serial": null,          "source": "user_phone", "grade": "phone", "notes": "RBI specimen-style layout, serial is 000 000000"},
   "real_phone/real_50_phone_obv.jpg":              {"denom": "50",   "side": "obverse",  "serial": "1DV 708101",  "source": "user_phone", "grade": "phone", "notes": "Small tilted phone photo"},
+  "real_phone/real_50_old_series_2da_obv.jpg":     {"denom": "50",   "side": "obverse",  "serial": "2DA*012720",  "source": "user_phone", "grade": "phone", "notes": "Pre-2017 Mahatma Gandhi Series; RBI replacement-note marker (* in serial)"},
   "real_phone/real_100_phone_obv.jpg":             {"denom": "100",  "side": "obverse",  "serial": "7MP 979885",  "source": "user_phone", "grade": "phone", "notes": "Mahatma Gandhi New Series, real serial"},
   "real_phone/real_100_phone_specimen_obv.jpg":    {"denom": "100",  "side": "specimen", "serial": null,          "source": "user_phone", "grade": "phone", "notes": "New series specimen, serial is 000 000000"},
   "real_phone/real_100_phone_blurry_obv.jpg":      {"denom": "100",  "side": "obverse",  "serial": "7MP 979885",  "source": "synthetic_derived", "grade": "phone", "notes": "Motion-blurred derivative of real_100_phone_obv.jpg (9px horizontal kernel) — phone-shake stress sample. Serial likely unreadable; denomination should still classify."},
