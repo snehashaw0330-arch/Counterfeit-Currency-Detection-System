@@ -3,10 +3,17 @@
 import { useState } from "react";
 import axios from "axios";
 
+type ProportionValue = {
+  actual_aspect: number;
+  expected_aspect: number;
+  deviation_pct: number;
+  measurement: "quad" | "frame";
+};
+
 type ForensicCheck = {
   status: "PASS" | "FAIL" | "INFO";
   details: string;
-  value?: string | null;
+  value?: string | number | ProportionValue | null;
 };
 
 type ForensicAnalysis = {
@@ -18,8 +25,19 @@ type ForensicAnalysis = {
   security_thread_detection: ForensicCheck;
   hologram_detection: ForensicCheck;
   denomination_classification: ForensicCheck;
+  proportion_analysis: ForensicCheck;
   modular_ai_pipeline: ForensicCheck;
 };
+
+function isProportionValue(v: unknown): v is ProportionValue {
+  return (
+    typeof v === "object"
+    && v !== null
+    && "actual_aspect" in v
+    && "expected_aspect" in v
+    && "deviation_pct" in v
+  );
+}
 
 type PredictResponse = {
   status: "success" | "error";
@@ -478,9 +496,14 @@ export default function Home() {
               ">
 
                 {
-                  result?.forensic_analysis
-                    ?.ocr_serial_number?.value
-                  || "Not Detected"
+                  (() => {
+                    const v =
+                      result?.forensic_analysis
+                        ?.ocr_serial_number?.value;
+                    return typeof v === "string" && v
+                      ? v
+                      : "Not Detected";
+                  })()
                 }
 
               </p>
@@ -500,6 +523,14 @@ export default function Home() {
               </p>
 
             </div>
+
+            {/* ================================================= */}
+            {/* PROPORTION ANALYSIS (dedicated panel) */}
+            {/* ================================================= */}
+
+            <ProportionPanel
+              check={result?.forensic_analysis?.proportion_analysis}
+            />
 
             {/* ================================================= */}
             {/* FORENSIC ANALYSIS */}
@@ -562,6 +593,11 @@ export default function Home() {
                 <FeatureCard
                   title="Denomination Classification"
                   check={result?.forensic_analysis?.denomination_classification}
+                />
+
+                <FeatureCard
+                  title="Proportion Analysis"
+                  check={result?.forensic_analysis?.proportion_analysis}
                 />
 
                 <FeatureCard
@@ -654,7 +690,7 @@ function FeatureCard({
         {check?.details ?? "Awaiting result"}
       </p>
 
-      {check?.value && (
+      {typeof check?.value === "string" && (
         <p className="
         text-sm
         text-green-400
@@ -665,6 +701,132 @@ function FeatureCard({
           {check.value}
         </p>
       )}
+
+    </div>
+  );
+}
+
+// =====================================================
+// PROPORTION ANALYSIS PANEL (Phase C-1)
+// =====================================================
+// Banknote proportion check surfaces the measured note quad
+// aspect vs the canonical RBI aspect for the OCR'd
+// denomination and renders the deviation prominently. A
+// fake printed on wrong-size paper or a digitally stretched
+// real-note image lands here.
+
+function ProportionPanel({ check }: { check?: ForensicCheck }) {
+
+  if (!check) return null;
+
+  const status = check.status;
+  const style = STATUS_STYLES[status];
+  const v = isProportionValue(check.value) ? check.value : null;
+
+  const deviationColor =
+    !v
+      ? "text-gray-400"
+      : v.deviation_pct <= 5
+        ? "text-green-400"
+        : v.deviation_pct <= 15
+          ? "text-yellow-400"
+          : "text-red-400";
+
+  return (
+
+    <div className={`
+    mt-8
+    bg-zinc-900
+    p-5
+    rounded-2xl
+    border
+    ${style.border}
+    `}>
+
+      <div className="
+      flex
+      justify-between
+      items-center
+      mb-3
+      ">
+
+        <h3 className="text-xl font-bold">
+          Proportion Analysis
+        </h3>
+
+        <span className={`
+        text-xs
+        font-bold
+        px-2
+        py-0.5
+        rounded-full
+        border
+        ${style.badge}
+        `}>
+          {style.label}
+        </span>
+
+      </div>
+
+      {v ? (
+
+        <div className="
+        grid
+        grid-cols-3
+        gap-4
+        mb-3
+        ">
+
+          <div>
+            <p className="text-xs text-gray-500 mb-1">
+              Measured Aspect
+            </p>
+            <p className="text-2xl font-mono text-white">
+              {v.actual_aspect.toFixed(3)}
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              via {v.measurement === "quad"
+                ? "detected note edges"
+                : "image frame"}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-gray-500 mb-1">
+              RBI Canonical
+            </p>
+            <p className="text-2xl font-mono text-white">
+              {v.expected_aspect.toFixed(3)}
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              for this denomination
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-gray-500 mb-1">
+              Deviation
+            </p>
+            <p className={`
+            text-2xl
+            font-mono
+            font-bold
+            ${deviationColor}
+            `}>
+              {v.deviation_pct.toFixed(1)}%
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              tolerance 15.0%
+            </p>
+          </div>
+
+        </div>
+
+      ) : null}
+
+      <p className="text-sm text-gray-400 break-words">
+        {check.details}
+      </p>
 
     </div>
   );
