@@ -211,13 +211,22 @@ async def predict_currency(
         colour = forensic_analysis.get("hologram_detection", {})
         colour_failed = colour.get("status") == "FAIL"
 
+        # Proportion FAIL means the note's measured aspect
+        # doesn't match the canonical RBI dimensions for the
+        # OCR'd denomination — a digital stretch or wrong-size
+        # paper. Strong fakery signal; vetoes REAL the same
+        # way colour failure does.
+        proportion = forensic_analysis.get("proportion_analysis", {})
+        proportion_failed = proportion.get("status") == "FAIL"
+
         # A REAL verdict requires:
         #   - structural sanity OK
         #   - combined score >= 0.65
-        #   - at least 5 of 8 forensic checks PASS
+        #   - at least 5 forensic checks PASS
         #     (reverse-side notes naturally lack OCR/face/
-        #     denomination, so requiring 6 punishes them)
+        #     denomination, so requiring more punishes them)
         #   - colour palette intact
+        #   - proportions match canonical for the denomination
 
         if structural_failed:
             final_verdict = "FAKE"
@@ -225,6 +234,7 @@ async def predict_currency(
             combined_score >= 0.65
             and pass_count >= 5
             and not colour_failed
+            and not proportion_failed
         ):
             final_verdict = "REAL"
         elif combined_score < 0.35 or (

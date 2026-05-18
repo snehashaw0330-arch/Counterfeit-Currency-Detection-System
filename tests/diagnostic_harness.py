@@ -90,6 +90,7 @@ def run_full_pipeline(image_path):
 
     sanity = fa.get("structural_sanity", {})
     colour = fa.get("hologram_detection", {})
+    proportion = fa.get("proportion_analysis", {})
 
     if sanity.get("status") == "FAIL":
         verdict = "FAKE"
@@ -97,6 +98,7 @@ def run_full_pipeline(image_path):
         combined >= 0.65
         and pass_count >= 5
         and colour.get("status") != "FAIL"
+        and proportion.get("status") != "FAIL"
     ):
         verdict = "REAL"
     elif combined < 0.35 or (raw < 0.35 and forensic_score < 0.35):

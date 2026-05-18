@@ -195,6 +195,33 @@ _BANKNOTE_ASPECT_LO = 1.6
 _BANKNOTE_ASPECT_HI = 3.2
 
 
+# Canonical RBI banknote dimensions (mm) for the Mahatma
+# Gandhi New Series. Source: RBI banknote specifications.
+# Used by analyze_proportions to detect digital stretching
+# or wrong-size paper counterfeits.
+_RBI_DIMENSIONS_MM = {
+    "10":   (123, 63),
+    "20":   (129, 63),
+    "50":   (135, 66),
+    "100":  (142, 66),
+    "200":  (146, 66),
+    "500":  (150, 66),
+    "2000": (166, 66),
+}
+
+_RBI_EXPECTED_ASPECT = {
+    denom: w / h for denom, (w, h) in _RBI_DIMENSIONS_MM.items()
+}
+
+# Tolerance for the proportion check. Phone perspective,
+# auto-crop rounding, Wikipedia scan-aspect drift, and frame-
+# padding on specimen images all introduce up to ~12% of
+# honest error on genuine notes. Tolerance set at 15% — flags
+# clear digital stretching (typically 25%+) without false-
+# positiving real uploads.
+_PROPORTION_TOLERANCE_PCT = 15.0
+
+
 def _order_quad(pts):
     """Return 4 corner points ordered [top-left, top-right, bottom-right, bottom-left]."""
 
@@ -210,20 +237,16 @@ def _order_quad(pts):
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
-def _locate_note(image):
-    """Find the banknote region and return a rectified landscape crop.
+def _detect_note_quad(image):
+    """Find the largest banknote-shaped 4-sided contour in the
+    image. Returns a dict with `quad` (4×2 ordered TL/TR/BR/BL),
+    `aspect` (long/short edge ratio), `avg_w`, `avg_h`, or
+    None if no plausible quad is found.
 
-    Strategy:
-      1. Grayscale + small blur + Canny edge detection
-      2. Dilate edges to close gaps in the note outline
-      3. Find external contours, sort by area
-      4. For each top-area contour, approximate to a polygon;
-         keep 4-sided ones whose bounding aspect matches a
-         banknote (~2.2:1, with tolerance for portrait quads)
-      5. Perspective-transform the quad to a canonical
-         landscape rectangle of the same long-edge length
-      6. If nothing plausible is found, return the original
-         image unchanged. Never raise."""
+    Pure detection — does not warp. Used by both `_locate_note`
+    (which then applies the perspective transform) and
+    `analyze_proportions` (which compares aspect to the canonical
+    RBI dimensions for the OCR'd denomination)."""
 
     try:
         img = _ensure_bgr(image)
@@ -231,7 +254,7 @@ def _locate_note(image):
         img_area = h * w
 
         if img_area < 10_000:
-            return img  # too small to crop reliably
+            return None
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -244,7 +267,7 @@ def _locate_note(image):
             edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
         if not contours:
-            return img
+            return None
 
         contours = sorted(
             contours, key=cv2.contourArea, reverse=True
@@ -253,11 +276,8 @@ def _locate_note(image):
         for contour in contours[:6]:
 
             area = cv2.contourArea(contour)
-            # Demand the note take up at least 15% of the frame;
-            # skip contours that span the whole image (likely
-            # the image border itself).
             if area < img_area * 0.15:
-                break  # contours are sorted, smaller ones won't help
+                break
             if area > img_area * 0.97:
                 continue
 
@@ -269,10 +289,10 @@ def _locate_note(image):
             quad = _order_quad(approx.reshape(4, 2))
             tl, tr, br, bl = quad
 
-            width_top = np.linalg.norm(tr - tl)
-            width_bot = np.linalg.norm(br - bl)
-            height_left = np.linalg.norm(bl - tl)
-            height_right = np.linalg.norm(br - tr)
+            width_top = float(np.linalg.norm(tr - tl))
+            width_bot = float(np.linalg.norm(br - bl))
+            height_left = float(np.linalg.norm(bl - tl))
+            height_right = float(np.linalg.norm(br - tr))
 
             avg_w = (width_top + width_bot) / 2.0
             avg_h = (height_left + height_right) / 2.0
@@ -289,38 +309,70 @@ def _locate_note(image):
             ):
                 continue
 
-            # Build the canonical landscape destination. We keep
-            # the long edge as the new width and derive height
-            # from the actual quad aspect (don't force exactly
-            # 2.2 — older / damaged notes can be ±10%).
-            target_w = int(long_edge)
-            target_h = int(long_edge / aspect)
-            if target_w < 200 or target_h < 80:
-                continue  # too small after warp to be useful
+            return {
+                "quad": quad,
+                "aspect": aspect,
+                "avg_w": avg_w,
+                "avg_h": avg_h,
+            }
 
-            # If the quad is portrait (avg_h > avg_w), reorder
-            # the source corners so the warp produces a landscape
-            # rectangle. Rotating the source ordering by 90° CW
-            # maps [TL,TR,BR,BL] → [BL,TL,TR,BR].
-            if avg_h > avg_w:
-                src = np.array([bl, tl, tr, br], dtype=np.float32)
-            else:
-                src = np.array([tl, tr, br, bl], dtype=np.float32)
+        return None
 
-            dst = np.array([
-                [0, 0],
-                [target_w - 1, 0],
-                [target_w - 1, target_h - 1],
-                [0, target_h - 1],
-            ], dtype=np.float32)
+    except Exception:
+        return None
 
-            transform = cv2.getPerspectiveTransform(src, dst)
-            warped = cv2.warpPerspective(
-                img, transform, (target_w, target_h)
-            )
-            return warped
 
-        return img
+def _locate_note(image):
+    """Find the banknote region and return a rectified landscape crop.
+
+    Uses `_detect_note_quad` for detection then perspective-
+    transforms to a canonical landscape rectangle.
+    Returns the original image unchanged when no plausible quad
+    is found. Never raises."""
+
+    try:
+        img = _ensure_bgr(image)
+        detection = _detect_note_quad(img)
+        if detection is None:
+            return img
+
+        quad = detection["quad"]
+        aspect = detection["aspect"]
+        avg_w = detection["avg_w"]
+        avg_h = detection["avg_h"]
+        tl, tr, br, bl = quad
+
+        long_edge = max(avg_w, avg_h)
+
+        # Build the canonical landscape destination. Keep the
+        # long edge as the new width and derive height from the
+        # actual quad aspect (don't force exactly 2.2 — older /
+        # damaged notes can be ±10%).
+        target_w = int(long_edge)
+        target_h = int(long_edge / aspect)
+        if target_w < 200 or target_h < 80:
+            return img
+
+        # If the quad is portrait (avg_h > avg_w), reorder the
+        # source corners so the warp produces a landscape
+        # rectangle. Rotating the source ordering by 90° CW
+        # maps [TL,TR,BR,BL] → [BL,TL,TR,BR].
+        if avg_h > avg_w:
+            src = np.array([bl, tl, tr, br], dtype=np.float32)
+        else:
+            src = np.array([tl, tr, br, bl], dtype=np.float32)
+
+        dst = np.array([
+            [0, 0],
+            [target_w - 1, 0],
+            [target_w - 1, target_h - 1],
+            [0, target_h - 1],
+        ], dtype=np.float32)
+
+        transform = cv2.getPerspectiveTransform(src, dst)
+        return cv2.warpPerspective(
+            img, transform, (target_w, target_h)
+        )
 
     except Exception:
         return _ensure_bgr(image)
@@ -1587,6 +1639,140 @@ def classify_denomination(image):
     }
 
 
+def _image_borders_uniform(
+    img,
+    max_border_std: float = 25.0,
+    min_interior_std: float = 15.0,
+) -> bool:
+    """True when the outer border is roughly uniform AND the
+    interior has content — i.e. the image is an isolated scan
+    of a note (not a busy phone frame AND not a blank canvas).
+    Only when both conditions hold does the frame aspect
+    reliably approximate the note aspect."""
+
+    h, w = img.shape[:2]
+    bw = max(3, min(h, w) // 50)  # ~2% of the shorter edge
+    if h <= 2 * bw or w <= 2 * bw:
+        return False
+
+    border = np.concatenate([
+        img[:bw, :, :].reshape(-1, 3),
+        img[-bw:, :, :].reshape(-1, 3),
+        img[:, :bw, :].reshape(-1, 3),
+        img[:, -bw:, :].reshape(-1, 3),
+    ])
+    interior = img[bw:-bw, bw:-bw, :]
+
+    return (
+        float(np.std(border)) < max_border_std
+        and float(np.std(interior)) > min_interior_std
+    )
+
+
+def analyze_proportions(image, denomination=None):
+    """Compare the detected note quad's aspect against the
+    canonical RBI aspect for the OCR'd denomination.
+
+    A counterfeit can be a real-note image that has been
+    digitally stretched/squashed, or a printed fake on the
+    wrong paper size. Either shows up as the note quad's
+    aspect ratio deviating from the canonical value.
+
+    Returns:
+      PASS  — detected aspect within `_PROPORTION_TOLERANCE_PCT`
+              of canonical
+      FAIL  — deviation exceeds the tolerance (likely digital
+              stretching or wrong-size paper)
+      INFO  — no quad detectable, or denomination unknown.
+              We do NOT FAIL in this case — absence of signal
+              isn't proof of fakery.
+
+    The `value` payload carries the raw numbers so the frontend
+    and the diagnostic harness can render them: {actual_aspect,
+    expected_aspect, deviation_pct}. None when we can't compute."""
+
+    if not denomination or denomination not in _RBI_EXPECTED_ASPECT:
+        return {
+            "status": "INFO",
+            "details": (
+                "Denomination unknown — cannot compare against "
+                "canonical proportions"
+            ),
+            "value": None,
+        }
+
+    img = _ensure_bgr(image)
+
+    # Primary: detect the note quad in the image. Works for
+    # phone photos with visible background around the note.
+    detection = _detect_note_quad(img)
+    if detection is not None:
+        actual_aspect = float(detection["aspect"])
+        method = "quad"
+    elif _image_borders_uniform(img):
+        # Fallback: image borders are uniform (clean scan or
+        # tight-cropped upload), so the frame aspect equals
+        # the note aspect. Don't use this fallback on busy
+        # phone-camera frames — there the frame aspect is the
+        # photo's aspect, not the note's, and we'd false-
+        # positive every real upload as "stretched".
+        h, w = img.shape[:2]
+        if h < 50 or w < 50:
+            return {
+                "status": "INFO",
+                "details": "Image too small to measure proportions",
+                "value": None,
+            }
+        long_edge = max(w, h)
+        short_edge = max(min(w, h), 1)
+        actual_aspect = long_edge / short_edge
+        method = "frame"
+    else:
+        return {
+            "status": "INFO",
+            "details": (
+                "Note edges not detectable and image is not "
+                "an isolated scan — cannot measure proportions"
+            ),
+            "value": None,
+        }
+    expected_aspect = _RBI_EXPECTED_ASPECT[denomination]
+    deviation_pct = (
+        abs(actual_aspect - expected_aspect) / expected_aspect
+        * 100.0
+    )
+
+    value = {
+        "actual_aspect": round(actual_aspect, 3),
+        "expected_aspect": round(expected_aspect, 3),
+        "deviation_pct": round(deviation_pct, 1),
+        "measurement": method,
+    }
+
+    if deviation_pct <= _PROPORTION_TOLERANCE_PCT:
+        return {
+            "status": "PASS",
+            "details": (
+                f"Proportions match Rs {denomination} canonical "
+                f"({actual_aspect:.2f} vs {expected_aspect:.2f}, "
+                f"{deviation_pct:.1f}% deviation, via {method})"
+            ),
+            "value": value,
+        }
+
+    return {
+        "status": "FAIL",
+        "details": (
+            f"Proportions off for Rs {denomination} "
+            f"({actual_aspect:.2f} vs canonical "
+            f"{expected_aspect:.2f}, {deviation_pct:.1f}% "
+            f"deviation via {method} — likely digital "
+            f"stretching or wrong-size paper)"
+        ),
+        "value": value,
+    }
+
+
 def _classify_denomination_tesseract(image):
     """Legacy Tesseract path. Kept as silent fallback."""
 
@@ -1785,9 +1971,16 @@ def run_forensic_pipeline(image):
          background so downstream checks see the note,
          not the room. Falls through unchanged when no
          quad is found.
+
+    Post-processing — analyze_proportions runs AFTER the
+    main checks because it consumes the denomination result.
+    It measures the quad on the ORIGINAL (pre-crop) image
+    because the auto-crop step has already normalised the
+    aspect away from the input geometry we want to evaluate.
     """
 
-    image = _locate_note(image)
+    original = _ensure_bgr(image)
+    image = _locate_note(original)
 
     checks = {
         "structural_sanity": structural_sanity,
@@ -1811,6 +2004,24 @@ def run_forensic_pipeline(image):
                 "status": "INFO",
                 "details": f"Error: {exc}"
             }
+
+    # Proportion check depends on the denomination output and
+    # must see the original (pre-crop) image — wired here as
+    # a post-pass rather than inside the `checks` dict.
+    try:
+        denom_value = (
+            results.get("denomination_classification", {})
+            .get("value")
+        )
+        results["proportion_analysis"] = analyze_proportions(
+            original, denom_value
+        )
+    except Exception as exc:
+        results["proportion_analysis"] = {
+            "status": "INFO",
+            "details": f"Error: {exc}",
+            "value": None,
+        }
 
     results["modular_ai_pipeline"] = {
         "status": "PASS",

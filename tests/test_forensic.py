@@ -20,6 +20,7 @@ EXPECTED_KEYS = {
     "security_thread_detection",
     "hologram_detection",
     "denomination_classification",
+    "proportion_analysis",
     "modular_ai_pipeline",
 }
 

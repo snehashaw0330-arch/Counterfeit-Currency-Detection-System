@@ -306,13 +306,76 @@ check.
 
 ---
 
-## 4. Phase C — Final polish, only if A + B aren't enough
+## 4. Phase C — Reactive polish
 
-Touch this only after Phase A and Phase B are committed and the
-user has tested with real notes again.
+Phase C work is opened in response to specific user-reported
+failures. Each sub-phase ships with its own commit, fixtures,
+and tests.
 
-### Possible tasks (pick based on what's still failing)
+### Phase C-1 — Banknote proportion check (new forensic feature)
 
+**Why:** A counterfeit can be a real-note image that has been
+digitally stretched/squashed to disguise origin, or a printed
+fake on incorrect-size paper. RBI banknotes have specific
+official dimensions per denomination — comparing the detected
+note quad's aspect against the canonical aspect for the OCR'd
+denomination gives a quantitative signal.
+
+**Canonical RBI dimensions (mm):**
+
+| Denom | mm        | Aspect |
+|-------|-----------|--------|
+| ₹10   | 123 × 63  | 1.952  |
+| ₹20   | 129 × 63  | 2.048  |
+| ₹50   | 135 × 66  | 2.045  |
+| ₹100  | 142 × 66  | 2.152  |
+| ₹200  | 146 × 66  | 2.212  |
+| ₹500  | 150 × 66  | 2.273  |
+| ₹2000 | 166 × 66  | 2.515  |
+
+**Tasks:**
+
+1. Refactor `_locate_note` into two pieces:
+   - `_detect_note_quad(image)` — returns `{found, quad, aspect}`
+     or `None`. Pure detection, no warp.
+   - `_locate_note(image)` — calls the detector then perspective-
+     rectifies the quad. Behaviour unchanged.
+2. Add `_RBI_DIMENSIONS` constants and a derived expected-aspect
+   table.
+3. Implement `analyze_proportions(image, denomination)`:
+   - PASS: detected aspect within 8% of canonical
+   - FAIL: deviation ≥ 8% (likely stretching or wrong-size paper)
+   - INFO: quad not detectable OR denomination unknown
+   - `value` field carries `actual_aspect`, `expected_aspect`,
+     and `deviation_pct` so the frontend can render the number
+4. Wire into `run_forensic_pipeline` after
+   `classify_denomination` (proportion check consumes the denom
+   result). Pass the *original* image (not the auto-cropped
+   one) so the quad-detector sees background to measure against.
+5. Add `proportion_analysis` to `EXPECTED_KEYS` in
+   `tests/test_forensic.py` so the shape contract stays honest.
+6. New pytest module `tests/test_phase_c_proportions.py`:
+   - PASS on a synthetic correctly-proportioned note
+   - FAIL on a 30% horizontally-stretched note
+   - INFO when no quad is detectable (blank input)
+   - INFO when denomination is None
+7. Add a synthetic stretched fixture
+   `real_50_phone_stretched_obv.jpg` (programmatic 30% horizontal
+   stretch of `real_50_phone_obv.jpg`) and a manifest entry with
+   `grade: fake`, `fake_type: digital_stretch`.
+
+**Acceptance criteria:**
+
+- All new Phase C-1 tests pass
+- Existing 25/25 still pass
+- Diagnostic harness: no regression on real bucket; new stretched
+  fixture detected as FAIL by `proportion_analysis`
+- Frontend response gains a `proportion_analysis` key — existing
+  keys unchanged
+
+### Phase C-2 — TBD reactive items
+
+Possible follow-ups (pick based on what's still failing):
 1. Replace EasyOCR with PaddleOCR if Phase A still misses
    readable serials. PaddleOCR has the same `(bbox, text,
    conf)` shape so the call sites only swap the engine.
@@ -327,7 +390,7 @@ user has tested with real notes again.
    per-check intermediate values, useful for the user when
    the system gets a wrong answer.
 
-### Acceptance criteria for Phase C
+### Acceptance criteria for Phase C-2+
 
 Decided per task. The Phase C work order is reactive — the user
 brings a failing real note, we fix that specific case.
