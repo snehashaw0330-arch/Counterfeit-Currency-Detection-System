@@ -1286,6 +1286,571 @@ def detect_security_thread(image):
 
 
 # =====================================================
+# 5b. ASCENDING SERIAL NUMBER TYPOGRAPHY ANALYSIS
+# =====================================================
+# RBI's Mahatma Gandhi New Series prints the bottom-right
+# serial number with PROGRESSIVELY INCREASING digit sizes
+# from left to right — the leftmost digit is smallest, the
+# rightmost largest. This is a deliberate anti-counterfeit
+# feature; cheap photocopy / inkjet fakes typically print
+# every digit at a uniform height. Reference: RBI "Know
+# Your Banknote" / press release on banknote security
+# features.
+#
+# Pipeline:
+#   1. Crop the bottom-right region of the rectified note
+#      where the ascending serial lives (the small top-left
+#      serial is uniform-size and NOT what we measure here).
+#      When EasyOCR is available we refine the crop onto
+#      the OCR'd serial bbox; otherwise we fall back to a
+#      heuristic quadrant.
+#   2. CLAHE + bilateral filter + adaptive threshold to
+#      extract digit blobs from uneven phone-camera lighting.
+#      A small morphological close repairs broken strokes.
+#   3. External-contour pass with strict geometric filters
+#      (area, aspect, fill, baseline alignment) to reject
+#      noise, prefix letters, watermark texture and
+#      background streaks. Overlapping detections are
+#      merged so adaptive-threshold split-tops don't double-
+#      count one digit.
+#   4. From the left-to-right blob list, isolate the
+#      trailing digit run — the 3-char prefix preceding the
+#      digits has uniform typography and including it would
+#      flatten the slope.
+#   5. Linear regression of digit height vs position. Real
+#      notes: positive slope, growth ratio > 1.08, decent
+#      R². Fakes: flat or shrinking. We use a STATISTICALLY
+#      TOLERANT validation (not strict-monotonic) because
+#      real notes show ±5–10% jitter per digit from ink
+#      wear, perspective and segmentation error.
+
+_SERIAL_TYPO_DIGIT_AREA_FRAC = 0.0015  # min digit area / strip area
+_SERIAL_TYPO_MIN_DIGITS = 3            # min aligned digits to call it
+_SERIAL_TYPO_GROWTH_LO = 1.08          # last/first height lower bound
+_SERIAL_TYPO_GROWTH_HI = 2.50          # implausible-segmentation cap
+_SERIAL_TYPO_R2_PASS = 0.45            # R² floor for confident PASS
+_SERIAL_TYPO_SLOPE_TOL = 0.005         # normalised slope/digit floor
+
+
+def _serial_typo_locate_strip(image):
+    """Crop the strip of the rectified note that contains the
+    ascending bottom-right serial.
+
+    Returns (strip_bgr, offset_xy) or (None, None). When
+    EasyOCR is available we refine the crop onto the actual
+    serial bbox; otherwise we fall back to a heuristic
+    bottom-right quadrant which downstream contour analysis
+    can still work with."""
+
+    img = _ensure_bgr(image)
+    h, w = img.shape[:2]
+
+    if h < 40 or w < 80:
+        return None, None
+
+    # Bottom-right region. The ascending serial sits within
+    # roughly the lower 45% × right 55% of the note.
+    cx0, cy0 = int(w * 0.45), int(h * 0.55)
+    coarse = img[cy0:int(h * 0.97), cx0:w]
+    if coarse.size == 0:
+        return None, None
+
+    reader = _get_easyocr_reader()
+    if reader is not None:
+
+        try:
+            results = reader.readtext(
+                coarse, allowlist=_ALNUM_SPACE, detail=1
+            )
+        except Exception:
+            results = []
+
+        best = None
+        best_area = 0
+
+        for bbox, text, conf in results:
+
+            if conf < 0.25:
+                continue
+
+            compact = text.strip().upper().replace(" ", "")
+            if not compact:
+                continue
+
+            looks_like_serial = (
+                _FULL_SERIAL_NO_SPACE.match(compact) is not None
+                or _SERIAL_TEXT_REGEX.search(compact) is not None
+                or (
+                    len(compact) >= 6
+                    and sum(c.isdigit() for c in compact) >= 5
+                )
+            )
+            if not looks_like_serial:
+                continue
+
+            xs = [int(p[0]) for p in bbox]
+            ys = [int(p[1]) for p in bbox]
+            bw = max(xs) - min(xs)
+            bh = max(ys) - min(ys)
+            area = bw * bh
+            if area > best_area:
+                best = (xs, ys)
+                best_area = area
+
+        if best is not None:
+            xs, ys = best
+            pad_x = max(8, (max(xs) - min(xs)) // 20)
+            pad_y = max(6, (max(ys) - min(ys)) // 8)
+            x0 = max(min(xs) - pad_x, 0)
+            x1 = min(max(xs) + pad_x, coarse.shape[1])
+            y0 = max(min(ys) - pad_y, 0)
+            y1 = min(max(ys) + pad_y, coarse.shape[0])
+
+            crop = coarse[y0:y1, x0:x1]
+            if crop.size > 0 and crop.shape[0] >= 12:
+                return crop, (cx0 + x0, cy0 + y0)
+
+    # Fallback: hand back the coarse quadrant. Contour
+    # segmentation has been tuned to still pull out the
+    # serial digits in this larger context.
+    return coarse, (cx0, cy0)
+
+
+def _serial_typo_segment(strip):
+    """Adaptive-threshold + contour-extract candidate digit
+    blobs from the serial strip. Returns left-to-right list
+    of dicts with bbox and measurements."""
+
+    if strip is None or strip.size == 0:
+        return []
+
+    gray = cv2.cvtColor(_ensure_bgr(strip), cv2.COLOR_BGR2GRAY)
+
+    # Upscale tiny crops so adaptive thresholding has enough
+    # pixels per stroke. Target ~80 px tall.
+    h = gray.shape[0]
+    scale = max(1.0, 80.0 / max(h, 1))
+    if scale > 1.0:
+        gray = cv2.resize(
+            gray, None,
+            fx=scale, fy=scale,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+    gray = _CLAHE.apply(gray)
+    gray = cv2.bilateralFilter(gray, 7, 50, 50)
+
+    # Adaptive (gaussian) threshold inverted so digits become
+    # white foreground. Block size + C calibrated for the
+    # 50–120 px-tall serial strips we see after upscale.
+    binary = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        25, 12,
+    )
+
+    # Tiny close to bridge broken strokes without merging
+    # neighbouring digits.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+    contours, _ = cv2.findContours(
+        binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    if not contours:
+        return []
+
+    strip_h, strip_w = binary.shape
+    strip_area = strip_h * strip_w
+    min_digit_area = strip_area * _SERIAL_TYPO_DIGIT_AREA_FRAC
+
+    raw = []
+    for c in contours:
+
+        x, y, cw, ch = cv2.boundingRect(c)
+        area = float(cv2.contourArea(c))
+
+        if area < min_digit_area:
+            continue
+        if ch < strip_h * 0.20:        # too short — noise speck
+            continue
+        if ch > strip_h * 0.95:        # spans whole strip — border
+            continue
+
+        aspect = cw / max(ch, 1)
+        if aspect < 0.15 or aspect > 1.6:  # not digit-shaped
+            continue
+
+        fill = area / max(cw * ch, 1)
+        if fill < 0.18:                # sparse blob → background texture
+            continue
+
+        raw.append({
+            "x": int(x), "y": int(y),
+            "w": int(cw), "h": int(ch),
+            "area": area,
+            "baseline": int(y + ch),
+            "fill": float(fill),
+        })
+
+    if not raw:
+        return []
+
+    # Drop blobs whose heights are nowhere near the median —
+    # rejects watermark scraps and partial joins.
+    heights = np.array([b["h"] for b in raw], dtype=np.float32)
+    median_h = float(np.median(heights))
+    raw = [
+        b for b in raw
+        if 0.35 * median_h <= b["h"] <= 2.5 * median_h
+    ]
+    if not raw:
+        return []
+
+    raw.sort(key=lambda b: b["x"])
+
+    # De-duplicate overlapping detections (adaptive threshold
+    # can split a single digit into stacked fragments).
+    merged = [raw[0]]
+    for b in raw[1:]:
+        prev = merged[-1]
+        overlap = b["x"] < prev["x"] + prev["w"] * 0.6
+        if overlap:
+            x0 = min(prev["x"], b["x"])
+            y0 = min(prev["y"], b["y"])
+            x1 = max(prev["x"] + prev["w"], b["x"] + b["w"])
+            y1 = max(prev["y"] + prev["h"], b["y"] + b["h"])
+            merged[-1] = {
+                "x": x0, "y": y0,
+                "w": x1 - x0, "h": y1 - y0,
+                "area": prev["area"] + b["area"],
+                "baseline": y1,
+                "fill": (prev["fill"] + b["fill"]) / 2.0,
+            }
+        else:
+            merged.append(b)
+
+    return merged
+
+
+def _serial_typo_pick_digits(blobs):
+    """Isolate the trailing digit run from the left-to-right
+    blob list. The 3-char alphabetic prefix does NOT ascend,
+    so including it would flatten the slope and false-
+    negative real notes. We also reject blobs whose baseline
+    drifts from the median — ascenders, dots and stray noise."""
+
+    if len(blobs) < _SERIAL_TYPO_MIN_DIGITS:
+        return []
+
+    # Drop the alphabetic prefix when we clearly have enough
+    # trailing blobs. With 7-9 blobs total assume serial is
+    # 6 digits + 3-char prefix; with ≤6 assume already digits-
+    # only (refined EasyOCR crop).
+    if len(blobs) >= 9:
+        candidates = blobs[-7:]
+    elif len(blobs) >= 7:
+        candidates = blobs[-6:]
+    else:
+        candidates = blobs[:]
+
+    baselines = np.array(
+        [b["baseline"] for b in candidates], dtype=np.float32
+    )
+    heights = np.array(
+        [b["h"] for b in candidates], dtype=np.float32
+    )
+    median_base = float(np.median(baselines))
+    median_h = float(np.median(heights))
+    tol = max(0.20 * median_h, 4.0)
+
+    aligned = [
+        b for b in candidates
+        if abs(b["baseline"] - median_base) <= tol
+    ]
+
+    return aligned
+
+
+def _serial_typo_fit(digits):
+    """Forensic regression on per-digit measurements.
+
+    Computes the full statistical envelope needed for RBI
+    progression validation:
+
+      Trend     — slope / intercept / R² of a linear fit
+                  of height vs position
+      Growth    — per-step ratios and percentages, mean,
+                  median and overall first→last percentage
+      Stability — monotonic_score (fraction of positive
+                  steps), smoothness_score (1 − norm. std
+                  of step ratios), consistency (1 − norm.
+                  RMSE of the regression)
+      Geometry  — per-digit height / width / area / baseline
+                  lists and a baseline_alignment_score
+
+    Returns None if there's not enough data to fit."""
+
+    if len(digits) < _SERIAL_TYPO_MIN_DIGITS:
+        return None
+
+    xs = np.arange(len(digits), dtype=np.float64)
+    ys = np.array([d["h"] for d in digits], dtype=np.float64)
+    widths = np.array([d["w"] for d in digits], dtype=np.float64)
+    areas = np.array([d["area"] for d in digits], dtype=np.float64)
+    baselines = np.array(
+        [d["baseline"] for d in digits], dtype=np.float64
+    )
+
+    mean_h = float(ys.mean())
+    if mean_h < 1.0:
+        return None
+
+    # ---- Linear regression: height ~ position ----
+    slope, intercept = np.polyfit(xs, ys, 1)
+    fit = slope * xs + intercept
+    ss_res = float(((ys - fit) ** 2).sum())
+    ss_tot = float(((ys - ys.mean()) ** 2).sum())
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-6 else 0.0
+    norm_slope = float(slope / mean_h)              # per-digit, normalised
+
+    # ---- Per-step growth: ratio and % increase ----
+    growth_ratios = [
+        float(ys[i] / max(ys[i - 1], 1.0))
+        for i in range(1, len(ys))
+    ]
+    growth_percentages = [
+        round((r - 1.0) * 100.0, 2) for r in growth_ratios
+    ]
+    avg_growth_pct = (
+        float(np.mean(growth_percentages))
+        if growth_percentages else 0.0
+    )
+    median_growth_pct = (
+        float(np.median(growth_percentages))
+        if growth_percentages else 0.0
+    )
+    total_growth_pct = float((ys[-1] / max(ys[0], 1.0) - 1.0) * 100.0)
+    overall_growth_ratio = float(ys[-1] / max(ys[0], 1.0))
+
+    # ---- Stability scores ----
+    # Monotonic score: fraction of inter-digit steps that
+    # are non-negative. Tolerant of single-step jitter
+    # (a fake reads ~0.50, a real note 0.85+).
+    if growth_ratios:
+        monotonic_score = float(
+            sum(1 for r in growth_ratios if r >= 0.985)
+            / len(growth_ratios)
+        )
+        gr_arr = np.array(growth_ratios, dtype=np.float64)
+        gr_std = float(np.std(gr_arr))
+        # Smoothness: 1 − coefficient of variation of growth
+        # ratios. Real notes have low CV (smooth ramp), fakes
+        # show wild noise around 1.0.
+        smoothness_score = max(
+            0.0, 1.0 - gr_std / max(float(np.mean(gr_arr)), 1e-3)
+        )
+    else:
+        monotonic_score = 0.0
+        smoothness_score = 0.0
+
+    rmse = float(np.sqrt(ss_res / len(ys)))
+    consistency = max(0.0, 1.0 - rmse / mean_h)
+
+    # ---- Baseline alignment ----
+    # std of baselines relative to mean digit height. A real
+    # serial sits on a perfect horizontal baseline → score
+    # near 1.0; a tilted or noisy crop drops below 0.7.
+    baseline_std = float(np.std(baselines))
+    baseline_alignment_score = max(
+        0.0, 1.0 - baseline_std / mean_h
+    )
+
+    return {
+        # --- regression ---
+        "slope": round(float(slope), 4),
+        "intercept": round(float(intercept), 4),
+        "r2": round(r2, 4),
+        "norm_slope": round(norm_slope, 4),
+        # --- growth ---
+        "growth_ratio": round(overall_growth_ratio, 4),
+        "growth_ratios": [round(r, 4) for r in growth_ratios],
+        "growth_percentages": growth_percentages,
+        "average_growth_percentage": round(avg_growth_pct, 2),
+        "median_growth_percentage": round(median_growth_pct, 2),
+        "total_growth_percentage": round(total_growth_pct, 2),
+        # --- stability ---
+        "monotonic_score": round(monotonic_score, 4),
+        "smoothness_score": round(smoothness_score, 4),
+        "consistency": round(consistency, 4),
+        # --- geometry ---
+        "mean_height": round(mean_h, 2),
+        "digit_heights": [int(v) for v in ys],
+        "digit_widths": [int(v) for v in widths],
+        "digit_areas": [round(float(v), 1) for v in areas],
+        "digit_baselines": [int(v) for v in baselines],
+        "baseline_alignment_score": round(baseline_alignment_score, 4),
+        # --- legacy alias (kept so any caller relying on the
+        # old key continues to work) ---
+        "heights": [int(v) for v in ys],
+        "growth_steps": [round(r, 3) for r in growth_ratios],
+    }
+
+
+def analyze_serial_typography(image):
+    """RBI ascending-serial typography validation.
+
+    Real banknote serials (bottom-right large serial) print
+    progressively larger digits from left to right.
+    Counterfeits typically print every digit the same size —
+    flat slope, growth ratio near 1.0.
+
+    Returns:
+      PASS — positive growth trend with growth ratio in valid
+             range and R² above floor → matches RBI spec
+      FAIL — flat or shrinking digits + growth ratio ≈ 1.0 →
+             uniform-size print, counterfeit signature
+      INFO — serial region not isolatable, too few digit blobs
+             segmented, baseline-alignment too weak, or signal
+             too noisy to call confidently. Absence of
+             measurement is NOT proof of fakery — we never
+             FAIL on insufficient evidence."""
+
+    try:
+        strip, _ = _serial_typo_locate_strip(image)
+    except Exception as exc:
+        return {
+            "status": "INFO",
+            "details": f"Serial region not isolatable: {exc}",
+            "value": None,
+        }
+
+    if strip is None or strip.size == 0:
+        return {
+            "status": "INFO",
+            "details": "Serial region not isolatable in image",
+            "value": None,
+        }
+
+    try:
+        blobs = _serial_typo_segment(strip)
+    except Exception as exc:
+        return {
+            "status": "INFO",
+            "details": f"Digit segmentation failed: {exc}",
+            "value": None,
+        }
+
+    if len(blobs) < _SERIAL_TYPO_MIN_DIGITS:
+        return {
+            "status": "INFO",
+            "details": (
+                f"Only {len(blobs)} digit blob(s) segmented in "
+                f"serial strip — image may be blurry, low-"
+                f"contrast or the serial may be partially cropped"
+            ),
+            "value": {"blobs": len(blobs)},
+        }
+
+    digits = _serial_typo_pick_digits(blobs)
+    if len(digits) < _SERIAL_TYPO_MIN_DIGITS:
+        return {
+            "status": "INFO",
+            "details": (
+                f"{len(blobs)} blobs found but only {len(digits)} "
+                f"share a baseline — typography measurement "
+                f"unreliable on this image"
+            ),
+            "value": {"blobs": len(blobs), "aligned": len(digits)},
+        }
+
+    metrics = _serial_typo_fit(digits)
+    if metrics is None:
+        return {
+            "status": "INFO",
+            "details": "Could not fit progression model to digits",
+            "value": None,
+        }
+
+    # Internal metrics drive the verdict; only the
+    # human-friendly fields below are exposed to the UI.
+    growth = metrics["growth_ratio"]
+    norm_slope = metrics["norm_slope"]
+    r2 = metrics["r2"]
+    monotonic = metrics["monotonic_score"]
+    total_pct = metrics["total_growth_percentage"]
+
+    rbi_match = (
+        growth >= _SERIAL_TYPO_GROWTH_LO
+        and growth <= _SERIAL_TYPO_GROWTH_HI
+        and norm_slope > _SERIAL_TYPO_SLOPE_TOL
+        and r2 >= _SERIAL_TYPO_R2_PASS
+        and monotonic >= 0.60
+    )
+
+    # Format growth percentages as plain integers — easier
+    # to read than two-decimal floats on the UI chip.
+    simple_growth_pcts = [
+        int(round(p)) for p in metrics["growth_percentages"]
+    ]
+    total_growth_str = f"{int(round(total_pct)):+d}%"
+
+    value = {
+        "digit_sizes": metrics["digit_heights"],
+        "growth_percentages": simple_growth_pcts,
+        "total_growth": total_growth_str,
+        "rbi_match": rbi_match,
+    }
+
+    # ---- FAIL: flat or shrinking — uniform-size print. ----
+    if growth < 1.02 and norm_slope <= _SERIAL_TYPO_SLOPE_TOL:
+        return {
+            "status": "FAIL",
+            "details": (
+                "Serial numbers are not increasing properly. "
+                "Genuine RBI notes usually show gradually "
+                "increasing digit sizes."
+            ),
+            "value": value,
+        }
+
+    # ---- Sanity guard: implausibly large growth means we
+    # caught non-digit blobs. Don't FAIL the note — say so. ----
+    if growth > _SERIAL_TYPO_GROWTH_HI:
+        return {
+            "status": "INFO",
+            "details": (
+                "Could not measure the serial reliably "
+                "(image too noisy or partially cropped)."
+            ),
+            "value": value,
+        }
+
+    # ---- PASS: smooth ascending progression. ----
+    if rbi_match:
+        return {
+            "status": "PASS",
+            "details": (
+                "Serial numbers are gradually increasing in size "
+                "from left to right, like genuine RBI notes."
+            ),
+            "value": value,
+        }
+
+    # ---- Borderline: don't FAIL on noisy phone photos. ----
+    return {
+        "status": "INFO",
+        "details": (
+            "Serial size pattern is unclear — image may be "
+            "blurry or tilted. Pattern not clearly matching "
+            "RBI notes but also not clearly fake."
+        ),
+        "value": value,
+    }
+
+
+# =====================================================
 # 6. COLOR RICHNESS / PALETTE INTEGRITY
 # =====================================================
 # Real banknotes carry a designed multi-hue palette with
@@ -2041,6 +2606,7 @@ def run_forensic_pipeline(image):
         "ocr_serial_number": extract_serial_number,
         "gandhi_face_analysis": analyze_gandhi_face,
         "security_thread_detection": detect_security_thread,
+        "serial_typography_analysis": analyze_serial_typography,
         "hologram_detection": detect_hologram,
         "denomination_classification": classify_denomination,
     }

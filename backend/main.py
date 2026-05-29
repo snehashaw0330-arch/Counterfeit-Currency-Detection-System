@@ -1,7 +1,13 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-from tensorflow.keras.models import load_model
+import importlib
+
+try:
+    tf = importlib.import_module("tensorflow")
+    load_model = tf.keras.models.load_model
+except ImportError:
+    from keras.models import load_model
 
 import numpy as np
 import cv2

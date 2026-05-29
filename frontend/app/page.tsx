@@ -23,6 +23,7 @@ type ForensicAnalysis = {
   ocr_serial_number: ForensicCheck;
   gandhi_face_analysis: ForensicCheck;
   security_thread_detection: ForensicCheck;
+  serial_typography_analysis: ForensicCheck;
   hologram_detection: ForensicCheck;
   denomination_classification: ForensicCheck;
   proportion_analysis: ForensicCheck;
@@ -132,7 +133,7 @@ export default function Home() {
         {
           headers: {
             "Content-Type":
-            "multipart/form-data",
+              "multipart/form-data",
           },
         }
       );
@@ -555,6 +556,7 @@ export default function Home() {
               gap-4
               ">
 
+
                 <FeatureCard
                   title="Structural Sanity"
                   check={result?.forensic_analysis?.structural_sanity}
@@ -584,6 +586,126 @@ export default function Home() {
                   title="Security Thread Detection"
                   check={result?.forensic_analysis?.security_thread_detection}
                 />
+                {(() => {
+                  const typo = result?.forensic_analysis?.serial_typography_analysis;
+                  const v = typo?.value as any;
+                  const status = typo?.status;
+                  const sizes: number[] = v?.digit_sizes ?? [];
+                  const pcts: number[] = v?.growth_percentages ?? [];
+                  const rbiMatch: boolean | undefined = v?.rbi_match;
+
+                  const statusBadge =
+                    status === "PASS"
+                      ? "bg-green-500/20 text-green-400 border-green-500/30"
+                      : status === "FAIL"
+                        ? "bg-red-500/20 text-red-400 border-red-500/30"
+                        : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+
+                  return (
+                    <div className="border border-zinc-800 rounded-2xl p-5 bg-zinc-900 space-y-5">
+
+                      {/* ---- Header + status badge ---- */}
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-lg font-bold text-white">
+                          RBI Serial Typography
+                        </h4>
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${statusBadge}`}>
+                          {status}
+                        </span>
+                      </div>
+
+                      {/* ---- Simple explanation ---- */}
+                      <p className="text-sm text-zinc-400 leading-relaxed">
+                        {typo?.details}
+                      </p>
+
+                      {/* ---- Digit sizes with arrows ---- */}
+                      {sizes.length > 0 && (
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-2 uppercase tracking-wider">
+                            Digit Sizes
+                          </p>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {sizes.map((s, i) => (
+                              <span key={i} className="flex items-center gap-1">
+                                <span className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white font-mono text-sm font-semibold">
+                                  {s}px
+                                </span>
+                                {i < sizes.length - 1 && (
+                                  <span className="text-zinc-500 text-lg">→</span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ---- Growth percentages as pills ---- */}
+                      {pcts.length > 0 && (
+                        <div>
+                          <p className="text-xs text-zinc-500 mb-2 uppercase tracking-wider">
+                            Growth per Step
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {pcts.map((g, i) => (
+                              <span
+                                key={i}
+                                className={`px-3 py-1.5 rounded-full text-sm font-semibold ${
+                                  g >= 0
+                                    ? "bg-green-500/15 text-green-400"
+                                    : "bg-red-500/15 text-red-400"
+                                }`}
+                              >
+                                {g >= 0 ? "+" : ""}{g}%
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ---- Total growth + RBI match row ---- */}
+                      <div className="grid grid-cols-2 gap-3">
+
+                        {v?.total_growth != null && (
+                          <div className="bg-zinc-800 rounded-xl p-3 text-center">
+                            <p className="text-xs text-zinc-500 mb-1">Total Growth</p>
+                            <p className="text-2xl font-bold text-cyan-400">
+                              {v.total_growth}
+                            </p>
+                          </div>
+                        )}
+
+                        {rbiMatch !== undefined && (
+                          <div className="bg-zinc-800 rounded-xl p-3 text-center">
+                            <p className="text-xs text-zinc-500 mb-1">RBI Pattern</p>
+                            <span className={`inline-block px-4 py-1 rounded-full text-sm font-bold ${
+                              rbiMatch
+                                ? "bg-green-500/20 text-green-400"
+                                : "bg-red-500/20 text-red-400"
+                            }`}>
+                              {rbiMatch ? "YES" : "NO"}
+                            </span>
+                          </div>
+                        )}
+
+                      </div>
+
+                      {/* ---- Verdict bar ---- */}
+                      {rbiMatch !== undefined && (
+                        <div className={`rounded-xl p-3 text-center text-sm font-medium ${
+                          rbiMatch
+                            ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                            : "bg-red-500/10 text-red-400 border border-red-500/20"
+                        }`}>
+                          {rbiMatch
+                            ? "Matches RBI increasing serial pattern"
+                            : "Does not match RBI increasing serial pattern"}
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })()}
 
                 <FeatureCard
                   title="Colour Palette Integrity"
