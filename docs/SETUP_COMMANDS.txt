@@ -1,6 +1,8 @@
 # Counterfeit Currency Detection - Setup Commands
 
 ---
+venv\Scripts\Activate
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 # 0. Prerequisites (one-time, system level)
 
