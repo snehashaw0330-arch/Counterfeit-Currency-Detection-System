@@ -6,7 +6,28 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-05-31 (Kaggle dataset ingested; benchmark refreshed)
+**Last updated:** 2026-06-01 (Phase E micro-print + forensic features folded into ML)
+
+## Phase E so far (visible-light security features)
+
+- **Shipped:** `analyze_microprint` (fine-print / micro-lettering) — evidence-honest
+  (FAIL on lost detail, INFO otherwise, **never a false PASS**; calibration showed
+  sharp fakes score as high as genuine). Wired into pipeline + `EXPECTED_KEYS` +
+  frontend type/card. New key `microprint_detection`. Tests in
+  `tests/test_phase_e_microprint.py`.
+- **Folded forensic signals into the ML vector** (user choice): `backend/features.py`
+  now 50-dim (+microprint sharpness, +watermark variance, +vertical-thread energy,
+  all log1p). Refactored `_watermark_variance` out of `detect_watermark` to share.
+  Retrained → **Random Forest improved to test macro-F1 0.742** and is the live
+  second opinion. Benchmark refreshed.
+- **Tried and REJECTED (honestly):** ORB emblem/motif matching — calibration showed
+  it false-fails genuine notes (median 0 inliers), so removed rather than shipped.
+  Lesson recorded: single hand-crafted visible-light checks are weak/unreliable on
+  this corpus; discrimination lives in the ML ensemble; **data is the binding
+  constraint**.
+- **New:** `scripts/evaluate_system.py` — end-to-end /predict verdict eval over the
+  corpus (the real product metric). `docs/DEMO_UPDATE.md` — plain-language 3-point
+  briefing for the demo presenter.
 
 ## Latest data + benchmark (Kaggle "Fake Currency Detection Dataset")
 
@@ -130,6 +151,10 @@ Decision pending from user on whether to add an optional augmentation phase.
 
 ## Session log (most recent first)
 
+- **2026-06-01 (6)** — Phase E: shipped honest micro-print check; folded 3 OCR-free
+  forensic signals into the 50-dim ML vector (RF → 0.742, now live 2nd opinion);
+  rejected unreliable ORB motif matching (would false-fail reals). Added
+  `scripts/evaluate_system.py` + `docs/DEMO_UPDATE.md`. 33+ tests green.
 - **2026-05-31 (5)** — Ingested Kaggle "Fake Currency Detection Dataset". Added
   exclusion of feature-crop/template/checkpoint folders to build_dataset.py;
   reorganised full notes into dataset/real|fake (kept feature crops under

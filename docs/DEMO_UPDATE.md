@@ -33,7 +33,9 @@ is in [PROJECT_SCOPE.md](PROJECT_SCOPE.md) and [STATUS.md](STATUS.md).
 
 - Technique comparison (held-out test): **Random Forest ≈ 74%** (best), and it
   beats the deep-learning CNN (≈ 56%). Full table: [BENCHMARK.md](BENCHMARK.md).
-- Whole-system end-to-end verdict on the full image set: **_(measuring — to be filled in)_**.
+- Whole-system end-to-end verdict on the full image set: run
+  `venv\Scripts\python.exe scripts\evaluate_system.py` (a few minutes on CPU) —
+  prints the Real/Suspicious/Fake confusion matrix for the current build.
 
 ## If asked "is it perfect?" — the honest answer
 
