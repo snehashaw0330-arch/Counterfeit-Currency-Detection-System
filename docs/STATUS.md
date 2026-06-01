@@ -29,6 +29,11 @@ chat resumes with zero context loss. The full plan lives in
   corpus (the real product metric). `docs/DEMO_UPDATE.md` — plain-language 3-point
   briefing for the demo presenter.
 
+**End-to-end result (65 imgs, full /predict verdict):** genuine → 30 REAL / 12
+SUSPICIOUS / 0 FAKE; fake → 9 REAL / 8 SUSPICIOUS / 6 FAKE. Headline: **0%
+false positives**, 71% genuine cleared, **61% of fakes flagged**, 39% of fakes
+(high-quality physical fakes) pass as REAL — the data/hardware ceiling.
+
 ## Latest data + benchmark (Kaggle "Fake Currency Detection Dataset")
 
 Corpus is now **65 images (42 genuine / 23 fake)**, 48 train / 17 test — up from

@@ -33,9 +33,14 @@ is in [PROJECT_SCOPE.md](PROJECT_SCOPE.md) and [STATUS.md](STATUS.md).
 
 - Technique comparison (held-out test): **Random Forest ≈ 74%** (best), and it
   beats the deep-learning CNN (≈ 56%). Full table: [BENCHMARK.md](BENCHMARK.md).
-- Whole-system end-to-end verdict on the full image set: run
-  `venv\Scripts\python.exe scripts\evaluate_system.py` (a few minutes on CPU) —
-  prints the Real/Suspicious/Fake confusion matrix for the current build.
+- Whole-system end-to-end on the full 65-image set:
+  - **0 false positives** — never calls a genuine note "Fake".
+  - **71% of genuine notes cleared as Real** (the rest flagged "Suspicious" for a
+    closer look — cautious, not wrong).
+  - **~61% of fakes flagged** (Fake or Suspicious). It misses ~39%, which are
+    high-quality fake-note photos that look genuine — the known limit of
+    phone-photo software without special hardware or more fake samples.
+  - Reproduce anytime: `venv\Scripts\python.exe scripts\evaluate_system.py`.
 
 ## If asked "is it perfect?" — the honest answer
 
