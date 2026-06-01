@@ -18,6 +18,7 @@ import os
 import threading
 
 from backend.forensic import run_forensic_pipeline, warmup_ocr
+from backend.classical import predict_classical, warmup_classical
 
 # =====================================================
 # FASTAPI APP
@@ -80,6 +81,11 @@ def _background_warmup():
         print(f"OCR Warmup: {'OK' if ok else 'unavailable, lazy fallback active'}")
     except Exception as exc:
         print(f"OCR Warmup raised (non-fatal): {exc}")
+    try:
+        clf = warmup_classical()
+        print(f"Classical model: {'loaded' if clf else 'not trained yet (run scripts/train_classical.py)'}")
+    except Exception as exc:
+        print(f"Classical warmup raised (non-fatal): {exc}")
 
 
 @app.on_event("startup")
@@ -256,6 +262,32 @@ async def predict_currency(
         )
 
         # =============================================
+        # MACHINE LEARNING TECHNIQUES (multi-model view)
+        # =============================================
+        # The classical model (best technique from Phase D —
+        # SVM/RandomForest/KNN/LogReg, see docs/BENCHMARK.md) runs
+        # as an INDEPENDENT SECOND OPINION on hand-crafted visual
+        # features. It is surfaced for transparency and to satisfy
+        # the "various ML techniques" scope; it does NOT alter the
+        # combined verdict here — fusion-weight recalibration is
+        # Phase F (docs/PROJECT_SCOPE.md). Never breaks /predict.
+
+        classical = predict_classical(bgr_image)
+
+        ml_models = {
+            "cnn": {
+                "verdict": model_verdict,
+                "confidence": f"{model_confidence:.2f}%",
+                "prob_genuine": float(prediction),
+            },
+            "classical": classical,
+            "agreement": (
+                classical["verdict"] == model_verdict
+                if classical.get("available") else None
+            ),
+        }
+
+        # =============================================
         # FINAL RESPONSE
         # =============================================
 
@@ -278,6 +310,8 @@ async def predict_currency(
             "forensic_pass_count": pass_count,
 
             "forensic_total_checks": total,
+
+            "ml_models": ml_models,
 
             "forensic_analysis": forensic_analysis
         }

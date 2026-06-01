@@ -5,6 +5,8 @@ pandas
 matplotlib
 seaborn
 scikit-learn
+scikit-image
+joblib
 pillow
 fastapi
 uvicorn

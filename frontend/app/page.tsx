@@ -24,6 +24,7 @@ type ForensicAnalysis = {
   gandhi_face_analysis: ForensicCheck;
   security_thread_detection: ForensicCheck;
   serial_typography_analysis: ForensicCheck;
+  microprint_detection: ForensicCheck;
   hologram_detection: ForensicCheck;
   denomination_classification: ForensicCheck;
   proportion_analysis: ForensicCheck;
@@ -40,6 +41,24 @@ function isProportionValue(v: unknown): v is ProportionValue {
   );
 }
 
+type ClassicalModel = {
+  available?: boolean;
+  name?: string | null;
+  verdict?: "REAL" | "FAKE" | null;
+  confidence?: string | null;
+  prob_genuine?: number | null;
+};
+
+type MlModels = {
+  cnn: {
+    verdict: "REAL" | "FAKE";
+    confidence: string;
+    prob_genuine: number;
+  };
+  classical: ClassicalModel;
+  agreement: boolean | null;
+};
+
 type PredictResponse = {
   status: "success" | "error";
   prediction?: "REAL" | "FAKE" | "SUSPICIOUS";
@@ -50,6 +69,7 @@ type PredictResponse = {
   forensic_score?: number;
   forensic_pass_count?: number;
   forensic_total_checks?: number;
+  ml_models?: MlModels;
   forensic_analysis?: ForensicAnalysis;
   message?: string;
 };
@@ -467,6 +487,12 @@ export default function Home() {
             </div>
 
             {/* ================================================= */}
+            {/* ML TECHNIQUE COMPARISON (Phase D) */}
+            {/* ================================================= */}
+
+            <ModelComparisonPanel models={result?.ml_models} />
+
+            {/* ================================================= */}
             {/* OCR SECTION */}
             {/* ================================================= */}
 
@@ -706,6 +732,11 @@ export default function Home() {
                     </div>
                   );
                 })()}
+
+                <FeatureCard
+                  title="Micro-lettering / Fine Print"
+                  check={result?.forensic_analysis?.microprint_detection}
+                />
 
                 <FeatureCard
                   title="Colour Palette Integrity"
@@ -948,6 +979,123 @@ function ProportionPanel({ check }: { check?: ForensicCheck }) {
 
       <p className="text-sm text-gray-400 break-words">
         {check.details}
+      </p>
+
+    </div>
+  );
+}
+
+// =====================================================
+// ML TECHNIQUE COMPARISON PANEL (Phase D)
+// =====================================================
+// Surfaces the two machine-learning views side by side:
+//   - MobileNetV2 (CNN) on raw pixels
+//   - the best classical technique (Phase D benchmark) on
+//     hand-crafted visual features, as an independent second
+//     opinion.
+// Display-only: the classical model does not drive the combined
+// verdict (fusion recalibration is Phase F). An agreement badge
+// makes model disagreement visible at a glance.
+
+const PRETTY_CLASSICAL: Record<string, string> = {
+  random_forest: "Random Forest",
+  svm_rbf: "SVM (RBF)",
+  logistic_regression: "Logistic Regression",
+  knn: "KNN",
+};
+
+function ModelVerdictTile({
+  title,
+  verdict,
+  confidence,
+  subtitle,
+}: {
+  title: string;
+  verdict?: string | null;
+  confidence?: string | null;
+  subtitle: string;
+}) {
+  return (
+    <div className="bg-zinc-900 p-4 rounded-2xl border border-zinc-700">
+      <h4 className="text-gray-400 text-sm mb-1">{title}</h4>
+      <p
+        className={`text-xl font-bold ${
+          VERDICT_COLOR[verdict ?? ""] ?? "text-gray-300"
+        }`}
+      >
+        {verdict ?? "N/A"}
+        {confidence && (
+          <span className="text-gray-500 text-sm font-normal ml-2">
+            ({confidence})
+          </span>
+        )}
+      </p>
+      <p className="text-xs text-gray-600 mt-1">{subtitle}</p>
+    </div>
+  );
+}
+
+function ModelComparisonPanel({ models }: { models?: MlModels }) {
+
+  if (!models) return null;
+
+  const classical = models.classical;
+  const classicalName =
+    classical?.name && PRETTY_CLASSICAL[classical.name]
+      ? PRETTY_CLASSICAL[classical.name]
+      : classical?.name ?? "Classical model";
+
+  const agreement = models.agreement;
+
+  return (
+    <div className="mt-8 bg-zinc-900 p-5 rounded-2xl border border-zinc-700">
+
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-bold">ML Technique Comparison</h3>
+        {agreement !== null && agreement !== undefined && (
+          <span
+            className={`text-xs font-bold px-3 py-1 rounded-full border ${
+              agreement
+                ? "bg-green-500/20 text-green-400 border-green-500/40"
+                : "bg-yellow-500/20 text-yellow-400 border-yellow-500/40"
+            }`}
+          >
+            {agreement ? "MODELS AGREE" : "MODELS DISAGREE"}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <ModelVerdictTile
+          title="MobileNetV2 (CNN)"
+          verdict={models.cnn?.verdict}
+          confidence={models.cnn?.confidence}
+          subtitle="Deep model on raw pixels"
+        />
+
+        {classical?.available ? (
+          <ModelVerdictTile
+            title={classicalName}
+            verdict={classical.verdict}
+            confidence={classical.confidence}
+            subtitle="Classical model on visual features (2nd opinion)"
+          />
+        ) : (
+          <div className="bg-zinc-900 p-4 rounded-2xl border border-zinc-700">
+            <h4 className="text-gray-400 text-sm mb-1">Classical model</h4>
+            <p className="text-xl font-bold text-gray-500">Not trained</p>
+            <p className="text-xs text-gray-600 mt-1">
+              Run scripts/train_classical.py to enable
+            </p>
+          </div>
+        )}
+
+      </div>
+
+      <p className="text-xs text-gray-600 mt-3">
+        Second opinion shown for transparency — does not change the
+        combined verdict above.
       </p>
 
     </div>

@@ -6,7 +6,30 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-05-31
+**Last updated:** 2026-05-31 (Kaggle dataset ingested; benchmark refreshed)
+
+## Latest data + benchmark (Kaggle "Fake Currency Detection Dataset")
+
+Corpus is now **65 images (42 genuine / 23 fake)**, 48 train / 17 test — up from
+34. The Kaggle set added **19 real + 12 fake FULL notes** (the 12 fakes are real
+fake-note *photos*, not synthetic). Its **101 feature-crop images** (`*_Features*`)
+were auto-excluded from the whole-note classifier and **kept under
+`dataset/Dataset/` for Phase E** (they are the id1–id6 security-feature templates,
+matching the thesis approach). Layout: full notes moved to
+`dataset/real/kaggle_500|2000` and `dataset/fake/kaggle_500|2000`.
+
+**Refreshed benchmark (held-out 17-image test, see docs/BENCHMARK.md):**
+| Technique | Test acc | Test macro-F1 | Fakes caught |
+|---|---|---|---|
+| **SVM (RBF)** | **0.765** | **0.742** | **4/6** |
+| Random Forest | 0.706 | 0.689 | 4/6 |
+| Logistic Regression | 0.706 | 0.622 | 2/6 |
+| KNN | 0.647 | 0.614 | 3/6 |
+| MobileNetV2 (CNN) | 0.588 | 0.564 | 3/6 |
+
+Headline: **classical ML on engineered features beats the off-the-shelf CNN**;
+SVM best on test. Model selection stays CV-based (no test peeking) — best by CV
+is recorded in metrics.json and used as the live second opinion.
 
 ---
 
@@ -42,22 +65,98 @@ pipeline fused into a REAL/SUSPICIOUS/FAKE verdict.
 
 ---
 
+## Phase D — DONE (D.1–D.6), end to end
+
+The "Various ML Techniques" requirement is now real and live:
+- **D.1** `scripts/build_dataset.py` → `dataset/index.json` (34 imgs: 23 genuine /
+  11 fake, 25 train / 9 test, deterministic, auto-ingests `dataset/real|fake/`).
+- **D.2** `backend/features.py` — 47-dim feature vector (LBP-26 + hue-12 +
+  colour-5 + structure-4). 6 tests.
+- **D.2.5** `backend/augment.py` — seeded augmentation. 5 tests.
+- **D.3** `scripts/train_classical.py` — SVM/RF/KNN/LogReg, **group-aware** CV
+  (StratifiedGroupKFold — fixed an augmentation-leakage flaw that had inflated CV
+  to 0.99). Saves `models/classical/*.joblib` (git-ignored) + `metrics.json`.
+- **D.4** `scripts/benchmark_models.py` → `docs/BENCHMARK.md` (committed).
+- **D.5** `backend/classical.py` + `main.py` — best classical model runs as a
+  live **second opinion** in `/predict` (`ml_models` block). Verdict logic
+  UNCHANGED (fusion-weight recalibration deferred to Phase F). 3 tests.
+- **D.6** frontend `ModelComparisonPanel` — CNN vs classical + agreement badge.
+
+**Benchmark headline (held-out 9-image test):** Random Forest best (test acc
+0.778, macro-F1 0.750 — only model that catches fakes). **MobileNetV2 CNN
+collapses to "all genuine" (catches 0/3 fakes, macro-F1 0.400)** — concrete
+evidence for why multiple techniques + forensics are needed. Numbers are modest
+and honestly capped by the ~34-image corpus; CV is now honest (RF 0.668).
+
+Also fixed a **pre-existing test bug**: `test_forensic.py` EXPECTED_KEYS was
+missing `serial_typography_analysis` (shipped in 45a7ec7 but never added to the
+guard). Now 15/15.
+
 ## Next concrete action
 
-**Start Phase D.1 — dataset assembly.** Acquire the public Indian-currency
-dataset, land it under `dataset/` (git-ignored) with a committed
-`dataset/MANIFEST.md`, and write `scripts/build_dataset.py` for a deterministic
-70/15/15 stratified split. Acceptance criteria for the whole phase are in
-PROJECT_SCOPE.md §4 Phase D.
+Dataset ingested + benchmark refreshed (see above). Pick the next phase:
+- **Phase E** — visible-light security features. **Now has ready-made templates:**
+  the Kaggle `*_Features` crops under `dataset/Dataset/` are exactly the id1–id6
+  security regions — use them as match references for motif / micro-lettering /
+  identification-mark checks. No further data needed to start.
+- **Phase F** — retrain MobileNetV2 on the 65-image set + recalibrate the fused
+  verdict (the CNN is now the weakest technique — 0.564 — so this has clear upside).
 
-> Awaiting: go-ahead to begin Phase D implementation (this session produced the
-> scope/status docs and refreshed the README; no pipeline code changed yet).
+**Still the biggest lever: more data**, especially real *physical* counterfeits
+(the 12 Kaggle fakes help; ingestion auto-scales — just drop more in and re-run
+the 3 scripts). Guide: [DATASET.md](DATASET.md).
+
+Then choose the next phase:
+- **Phase E** — visible-light security features (motifs, micro-lettering,
+  identification mark, bleed lines, see-through). Scope §4.
+- **Phase F** — retrain MobileNetV2 on the dataset + recalibrate the fused
+  verdict (high value given the CNN's poor showing above).
+
+> **Install when Phase F / plotting starts:** pandas, matplotlib, seaborn
+> (declared in requirements; BENCHMARK.md currently uses plain-markdown tables,
+> so not needed yet).
+
+## Open thread — generative AI?
+
+User asked whether the shared docs require a "GenAI that creates notes that
+can't be counterfeited." **They do not** — both the IEEE paper and the thesis
+are detection-only; no generation, no GenAI. Discussed the legitimate adjacent
+use: generative *data augmentation* (synthetic tampered/fake samples) to harden
+the detector — optional, defensible, would also count as a "various ML
+technique." NOT building a realistic-counterfeit generator (illegal/misusable).
+Decision pending from user on whether to add an optional augmentation phase.
 
 ---
 
 ## Session log (most recent first)
 
-- **2026-05-31** — Read the full workspace. Authored `docs/PROJECT_SCOPE.md`
+- **2026-05-31 (5)** — Ingested Kaggle "Fake Currency Detection Dataset". Added
+  exclusion of feature-crop/template/checkpoint folders to build_dataset.py;
+  reorganised full notes into dataset/real|fake (kept feature crops under
+  dataset/Dataset/ for Phase E). Corpus 34→65 imgs. Retrained + re-benchmarked:
+  SVM best (test macro-F1 0.742); all classical models beat the CNN (0.564).
+  Fixed stale hardcoded caveat in train_classical.py (now reports real counts).
+- **2026-05-31 (4)** — Data-prep hardening (user chose "more data first").
+  Rewrote `scripts/build_dataset.py` to recursively ingest any folder layout
+  under `dataset/` with path-based label inference + `--validate` corrupt-image
+  pass; confirmed no regression on fixtures (still 34/25/9). Wrote
+  `docs/DATASET.md` (drop-in rules + suggested Kaggle/Mendeley datasets).
+- **2026-05-31 (3)** — **Phase D shipped end-to-end (D.1–D.6).** Dataset indexer,
+  feature extractor, augmentation, classical training (group-aware CV),
+  benchmark report, live second-opinion in `/predict`, frontend comparison
+  panel. Generated `docs/BENCHMARK.md`. Fixed pre-existing EXPECTED_KEYS test
+  bug. 33 tests verified green this session (forensic 15, D-features 6,
+  D-augment 5, D-classical 3, api 4). Confirmed: dataset/ did not exist; the
+  corpus is the tests/sample_notes fixtures (~34 imgs). Answered user: GenAI to
+  "create uncounterfeitable notes" is NOT in the shared docs; offered honest
+  generative-augmentation instead (now used in D.3 training).
+- **2026-05-31 (2)** — **Phase D.2 shipped.** Installed scikit-learn + joblib
+  (venv was out of sync with requirements). Built `backend/features.py` —
+  deterministic 47-dim hand-crafted feature vector (LBP-26 + hue-hist-12 +
+  colour-scalars-5 + structure-4), never-raises contract. Added
+  `tests/test_phase_d_features.py` (6 tests, all green in ~5 s). Added
+  scikit-image + joblib to requirements.txt.
+- **2026-05-31 (1)** — Read the full workspace. Authored `docs/PROJECT_SCOPE.md`
   (master scope, phases D–H, brief-traceability matrix, acceptance gates) and
   this STATUS.md. Refreshed stale README. No backend/frontend code changed.
 
@@ -66,8 +165,19 @@ PROJECT_SCOPE.md §4 Phase D.
 ## Verification commands (current)
 ```
 venv\Scripts\Activate
-python -m pytest tests/ -v          # ~36 tests; Phase-A OCR tests ~2 min
+python -m pytest tests/ -v          # ~44 tests; Phase-A OCR tests ~2 min
 python tests\diagnostic_harness.py  # objective confusion-matrix numbers
+
+# Phase D pipeline (re-run in this order after adding dataset images):
+python scripts\build_dataset.py     # -> dataset/index.json
+python scripts\train_classical.py   # -> models/classical/*.joblib + metrics.json
+python scripts\benchmark_models.py  # -> docs/BENCHMARK.md
+
 uvicorn backend.main:app --host 127.0.0.1 --port 8000
 cd frontend && npm run dev
 ```
+
+> Not re-run this session (unaffected by Phase D — no OCR/locate/proportion code
+> changed): test_phase_a_ocr (~2 min), test_phase_b_locate, test_phase_c_proportions.
+> The full diagnostic harness wasn't re-run because the verdict logic is unchanged
+> (classical model is display-only); test_api's blank→not-REAL guard still passes.

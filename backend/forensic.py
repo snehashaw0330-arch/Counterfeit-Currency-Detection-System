@@ -1083,7 +1083,11 @@ def analyze_uv_features(image):
 # that panel: a real watermark produces a soft
 # gradient, a counterfeit print is flat or noisy.
 
-def detect_watermark(image):
+def _watermark_variance(image):
+    """Blurred-panel brightness variance of the left watermark panel.
+
+    Shared by detect_watermark (verdict check) and the Phase-D
+    feature extractor. Returns None when the panel is empty."""
 
     img = _ensure_bgr(image)
     h, w = img.shape[:2]
@@ -1092,19 +1096,24 @@ def detect_watermark(image):
         int(h * 0.15):int(h * 0.85),
         0:int(w * 0.25)
     ]
-
     if panel.size == 0:
+        return None
+
+    gray = cv2.cvtColor(panel, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (21, 21), 0)
+    return float(np.var(blurred))
+
+
+def detect_watermark(image):
+
+    variance = _watermark_variance(image)
+
+    if variance is None:
 
         return {
             "status": "INFO",
             "details": "Image too small to evaluate"
         }
-
-    gray = cv2.cvtColor(panel, cv2.COLOR_BGR2GRAY)
-
-    blurred = cv2.GaussianBlur(gray, (21, 21), 0)
-
-    variance = float(np.var(blurred))
 
     if 80 <= variance <= 2500:
 
@@ -1845,6 +1854,136 @@ def analyze_serial_typography(image):
             "Serial size pattern is unclear — image may be "
             "blurry or tilted. Pattern not clearly matching "
             "RBI notes but also not clearly fake."
+        ),
+        "value": value,
+    }
+
+
+# =====================================================
+# 5c. MICRO-LETTERING / FINE-PRINT SHARPNESS
+# =====================================================
+# Genuine notes carry crisp micro-lettering ("RBI" + the
+# denomination in tiny type) and fine intaglio line-work.
+# Counterfeits printed on consumer inkjet/laser printers or
+# photocopied lose this high-frequency detail. We measure
+# scale-normalised high-frequency energy (variance of the
+# Laplacian on a size-normalised central crop) as a proxy for
+# fine print detail.
+#
+# Scale normalisation (resize the note to a fixed width before
+# measuring) is essential: raw Laplacian variance scales with
+# capture resolution, so without it a high-res genuine scan and
+# a high-res fake photo aren't comparable. After normalising to
+# a common width the metric reflects *relative* fine detail.
+#
+# Honest by construction: when the native image is too low-
+# resolution to resolve micro-print at all, we return INFO (not
+# FAIL) — we cannot prove fakery from missing resolution.
+#
+# CALIBRATION FINDING (scripts/measure_microprint.py over the
+# 65-image corpus): high sharpness does NOT imply genuine — the
+# physical-fake-note photos in the corpus are just as sharp as
+# real notes (genuine median 1423 vs fake median 1708). So this
+# check NEVER emits PASS (a sharp note is not certified genuine).
+# It only FAILs when fine detail is essentially absent on an
+# adequately-resolved image (blanks / heavy blur all score < 3,
+# while the lowest adequately-resolved genuine scores ~90) — i.e.
+# it flags photocopied / blurred low-quality fakes without ever
+# crediting a crisp fake. Everything else is INFO (detail present,
+# but not proof of authenticity). The real genuine/fake
+# discrimination lives in the ML ensemble + stronger checks.
+
+_MICROPRINT_NORM_WIDTH = 1000
+_MICROPRINT_MIN_NATIVE_WIDTH = 550   # below this, can't assess micro-print
+# Threshold calibrated against the corpus (scripts/measure_microprint.py):
+# degraded fakes score < 3, lowest adequately-resolved genuine ~90.
+_MICROPRINT_FAIL = 25.0              # <  -> fine detail lost (fake-like print)
+
+
+def _microprint_score(image):
+    """Return (laplacian_variance, native_width).
+
+    The note is size-normalised to a fixed width so the variance
+    is comparable across capture resolutions; the central print
+    band is measured (margins / watermark panel excluded)."""
+
+    img = _ensure_bgr(image)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    native_h, native_w = gray.shape[:2]
+
+    if native_w < 2 or native_h < 2:
+        return 0.0, native_w
+
+    scale = _MICROPRINT_NORM_WIDTH / native_w
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    norm = cv2.resize(
+        gray, (_MICROPRINT_NORM_WIDTH, max(int(native_h * scale), 1)),
+        interpolation=interp,
+    )
+
+    h, w = norm.shape[:2]
+    # Central print band — skip the left watermark panel and the
+    # outer margins where there's no micro-print.
+    crop = norm[int(h * 0.15):int(h * 0.85), int(w * 0.20):int(w * 0.80)]
+    if crop.size == 0:
+        return 0.0, native_w
+
+    lap = cv2.Laplacian(crop, cv2.CV_64F)
+    return float(lap.var()), native_w
+
+
+def analyze_microprint(image):
+    """Micro-lettering / fine-print sharpness check.
+
+    PASS — crisp high-frequency detail consistent with genuine
+           intaglio micro-print.
+    FAIL — fine detail clearly lost (blurred / flat consumer
+           print) on an image with enough resolution to judge.
+    INFO — image too low-resolution to assess, or borderline.
+           Absence of resolution is NOT proof of fakery."""
+
+    try:
+        score, native_w = _microprint_score(image)
+    except Exception as exc:
+        return {
+            "status": "INFO",
+            "details": f"Micro-print not measurable: {exc}",
+            "value": None,
+        }
+
+    value = {"sharpness": round(score, 1), "native_width": int(native_w)}
+
+    if native_w < _MICROPRINT_MIN_NATIVE_WIDTH:
+        return {
+            "status": "INFO",
+            "details": (
+                f"Image too low-resolution ({native_w}px wide) to assess "
+                f"micro-lettering — not a fake indicator"
+            ),
+            "value": value,
+        }
+
+    if score < _MICROPRINT_FAIL:
+        return {
+            "status": "FAIL",
+            "details": (
+                f"Fine print detail lost (sharpness {score:.0f}) — "
+                f"blurred/flat print, typical of photocopied or "
+                f"low-quality counterfeit notes"
+            ),
+            "value": value,
+        }
+
+    # Detail is present, but (per calibration) crisp print does NOT
+    # certify a genuine note — sharp fakes score just as high. So we
+    # surface the measurement as INFO and never credit it as PASS;
+    # genuineness is decided by the ML ensemble + stronger checks.
+    return {
+        "status": "INFO",
+        "details": (
+            f"Fine print detail present (sharpness {score:.0f}). "
+            f"Micro-lettering legible; sharpness alone is not proof "
+            f"of authenticity."
         ),
         "value": value,
     }
@@ -2607,6 +2746,7 @@ def run_forensic_pipeline(image):
         "gandhi_face_analysis": analyze_gandhi_face,
         "security_thread_detection": detect_security_thread,
         "serial_typography_analysis": analyze_serial_typography,
+        "microprint_detection": analyze_microprint,
         "hologram_detection": detect_hologram,
         "denomination_classification": classify_denomination,
     }

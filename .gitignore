@@ -21,3 +21,7 @@ out/
 backend/*.jpg
 tests/diagnostic_report.json
 tests/ocr_debug/
+
+# Phase D classical model binaries (regenerable: scripts/train_classical.py).
+# metrics.json is kept tracked as the committed benchmark record.
+models/classical/*.joblib

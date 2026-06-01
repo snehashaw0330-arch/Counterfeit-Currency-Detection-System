@@ -1,0 +1,209 @@
+"""
+Phase D.4 — benchmark report generator.
+
+Evaluates EVERY machine-learning technique on the SAME held-out
+test split and writes docs/BENCHMARK.md — the comparison table the
+project title ("...with Various Machine Learning Techniques")
+requires. Techniques compared:
+
+    MobileNetV2 (CNN, the original model)  +
+    Logistic Regression · SVM (RBF) · Random Forest · KNN
+
+The classical models + scaler come from models/classical/ (run
+scripts/train_classical.py first). The CNN is loaded from
+models/mobilenet_counterfeit_detector.keras and run on the same
+test images so the comparison is apples-to-apples.
+
+Run:
+    venv\\Scripts\\python.exe scripts\\benchmark_models.py
+
+Output (committed):
+    docs/BENCHMARK.md     regenerated from data, never hand-typed
+"""
+
+import json
+import os
+import sys
+
+import cv2
+import numpy as np
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+import joblib  # noqa: E402
+from sklearn.metrics import (  # noqa: E402
+    accuracy_score, precision_recall_fscore_support,
+    confusion_matrix, f1_score,
+)
+
+from backend.features import extract_feature_vector  # noqa: E402
+
+INDEX = os.path.join(ROOT, "dataset", "index.json")
+CLF_DIR = os.path.join(ROOT, "models", "classical")
+METRICS = os.path.join(CLF_DIR, "metrics.json")
+CNN_PATH = os.path.join(ROOT, "models", "mobilenet_counterfeit_detector.keras")
+OUT = os.path.join(ROOT, "docs", "BENCHMARK.md")
+
+CLASSICAL = ["logistic_regression", "svm_rbf", "random_forest", "knn"]
+PRETTY = {
+    "logistic_regression": "Logistic Regression",
+    "svm_rbf": "SVM (RBF)",
+    "random_forest": "Random Forest",
+    "knn": "KNN",
+    "mobilenet_cnn": "MobileNetV2 (CNN)",
+}
+
+
+def _load_test():
+    with open(INDEX, "r", encoding="utf-8") as fh:
+        index = json.load(fh)
+    test = [s for s in index["samples"] if s["split"] == "test"]
+    imgs, y, paths = [], [], []
+    for s in test:
+        img = cv2.imread(os.path.join(ROOT, s["path"].replace("/", os.sep)))
+        if img is None:
+            continue
+        imgs.append(img)
+        y.append(s["y"])
+        paths.append(s["path"])
+    return imgs, np.array(y), paths
+
+
+def _metrics(y_true, y_pred):
+    p, r, f, _ = precision_recall_fscore_support(
+        y_true, y_pred, labels=[0, 1], zero_division=0,
+    )
+    return {
+        "acc": float(accuracy_score(y_true, y_pred)),
+        "macro_f1": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+        "prec_fake": float(p[0]), "rec_fake": float(r[0]),
+        "prec_gen": float(p[1]), "rec_gen": float(r[1]),
+        "cm": confusion_matrix(y_true, y_pred, labels=[0, 1]).tolist(),
+    }
+
+
+def _classical_preds(imgs):
+    scaler = joblib.load(os.path.join(CLF_DIR, "scaler.joblib"))
+    X = scaler.transform(
+        np.array([extract_feature_vector(im) for im in imgs], dtype=np.float32)
+    )
+    preds = {}
+    for name in CLASSICAL:
+        model = joblib.load(os.path.join(CLF_DIR, f"{name}.joblib"))
+        preds[name] = model.predict(X)
+    return preds
+
+
+def _cnn_preds(imgs):
+    import importlib
+    try:
+        tf = importlib.import_module("tensorflow")
+        load_model = tf.keras.models.load_model
+    except ImportError:
+        from keras.models import load_model
+    model = load_model(CNN_PATH)
+    out = []
+    for im in imgs:
+        rgb = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        x = np.expand_dims(cv2.resize(rgb, (224, 224)) / 255.0, axis=0)
+        prob = float(model.predict(x, verbose=0)[0][0])
+        out.append(1 if prob >= 0.5 else 0)   # 1=genuine (matches main.py)
+    return np.array(out)
+
+
+def _cm_table(cm):
+    # cm = [[TN, FP], [FN, TP]] with rows=actual [fake, genuine]
+    return (
+        "| actual ↓ / pred → | fake | genuine |\n"
+        "|---|---|---|\n"
+        f"| **fake** | {cm[0][0]} | {cm[0][1]} |\n"
+        f"| **genuine** | {cm[1][0]} | {cm[1][1]} |"
+    )
+
+
+def main():
+    for path, label in ((INDEX, "dataset/index.json"),
+                        (METRICS, "models/classical/metrics.json")):
+        if not os.path.exists(path):
+            print(f"Missing {label} — run build_dataset.py / train_classical.py first.")
+            return 1
+
+    with open(METRICS, "r", encoding="utf-8") as fh:
+        clf_metrics = json.load(fh)
+
+    imgs, y, paths = _load_test()
+    print(f"Evaluating on {len(imgs)} held-out test images...")
+
+    preds = _classical_preds(imgs)
+    cnn_available = os.path.exists(CNN_PATH)
+    if cnn_available:
+        try:
+            preds["mobilenet_cnn"] = _cnn_preds(imgs)
+        except Exception as exc:
+            print(f"  CNN eval skipped ({exc})")
+            cnn_available = False
+
+    rows = {name: _metrics(y, p) for name, p in preds.items()}
+
+    cv_of = {
+        n: clf_metrics["models"][n].get("cv_macro_f1_mean")
+        for n in CLASSICAL
+    }
+
+    order = CLASSICAL + (["mobilenet_cnn"] if cnn_available else [])
+
+    lines = []
+    lines.append("# Model Benchmark — Various ML Techniques\n")
+    lines.append("> Auto-generated by `scripts/benchmark_models.py`. Do not "
+                 "hand-edit. Re-run after retraining to refresh.\n")
+    meta = clf_metrics["meta"]
+    lines.append("## Dataset\n")
+    lines.append(f"- Feature dim: **{meta['feature_dim']}** "
+                 f"(`backend/features.py`: LBP + colour + structure + "
+                 f"OCR-free forensic signals)")
+    lines.append(f"- Train rows (augmented): **{meta['train_rows']}** · "
+                 f"Test images (no augmentation): **{len(imgs)}**")
+    lines.append(f"- Label scheme: {meta['label_scheme']}")
+    lines.append(f"- Augmentation: +{meta['augmentation']['aug_genuine']}/genuine, "
+                 f"+{meta['augmentation']['aug_fake']}/fake base image\n")
+    lines.append("> **Honesty caveat.** " + meta["data_caveat"] + "\n")
+
+    lines.append("## Comparison (held-out test split)\n")
+    lines.append("| Technique | CV macro-F1 | Test acc | Test macro-F1 | "
+                 "Prec (genuine) | Recall (genuine) | Prec (fake) | Recall (fake) |")
+    lines.append("|---|---|---|---|---|---|---|---|")
+    for name in order:
+        m = rows[name]
+        cv = cv_of.get(name)
+        cv_str = f"{cv:.3f}" if cv is not None else "— (not CV'd)"
+        lines.append(
+            f"| {PRETTY[name]} | {cv_str} | {m['acc']:.3f} | {m['macro_f1']:.3f} | "
+            f"{m['prec_gen']:.3f} | {m['rec_gen']:.3f} | "
+            f"{m['prec_fake']:.3f} | {m['rec_fake']:.3f} |"
+        )
+    lines.append("")
+
+    # Best by test macro-F1 (CNN not CV'd, so test is the common axis).
+    best = max(order, key=lambda n: rows[n]["macro_f1"])
+    lines.append(f"**Best on test macro-F1:** {PRETTY[best]} "
+                 f"({rows[best]['macro_f1']:.3f}). "
+                 f"Best classical by CV: {PRETTY[meta['best_model']]} "
+                 f"({cv_of[meta['best_model']]:.3f}).\n")
+
+    lines.append("## Confusion matrices (test)\n")
+    for name in order:
+        lines.append(f"### {PRETTY[name]}\n")
+        lines.append(_cm_table(rows[name]["cm"]))
+        lines.append("")
+
+    with open(OUT, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines))
+
+    print(f"Wrote {os.path.relpath(OUT, ROOT)}")
+    print(f"Best on test macro-F1: {PRETTY[best]} ({rows[best]['macro_f1']:.3f})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

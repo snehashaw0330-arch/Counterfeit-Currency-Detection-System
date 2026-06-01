@@ -18,6 +18,8 @@ EXPECTED_KEYS = {
     "ocr_serial_number",
     "gandhi_face_analysis",
     "security_thread_detection",
+    "serial_typography_analysis",
+    "microprint_detection",
     "hologram_detection",
     "denomination_classification",
     "proportion_analysis",
