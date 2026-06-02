@@ -783,6 +783,13 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* ================================================= */}
+      {/* SECURITY PATTERN STUDIO (Phase J) */}
+      {/* ================================================= */}
+
+      <SecurityPatternStudio />
+
     </main>
   );
 }
@@ -1276,6 +1283,124 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
 
         </div>
       )}
+
+    </div>
+  );
+}
+
+// =====================================================
+// SECURITY PATTERN STUDIO (Phase J)
+// =====================================================
+// The "generative" half of the project, done legitimately. Real currency
+// resists cloning through physics + the deterministic mathematical complexity
+// of guilloché engraving. This studio procedurally generates that kind of
+// ABSTRACT ornament (woven sinusoidal lattices + spirograph rosettes +
+// micro-text) from a seed. Same seed → same art, so a pattern keyed to a serial
+// can be regenerated and visually compared. It is decorative art — it does NOT
+// generate currency.
+
+const BACKEND = "http://127.0.0.1:8000";
+
+function SecurityPatternStudio() {
+
+  const [seedInput, setSeedInput] = useState("ABHI-500-2026");
+  const [appliedSeed, setAppliedSeed] = useState("ABHI-500-2026");
+
+  const generate = () => {
+    const s = seedInput.trim() || "0";
+    setAppliedSeed(s);
+  };
+
+  const imgUrl =
+    `${BACKEND}/security-pattern?seed=${encodeURIComponent(appliedSeed)}&size=600`;
+
+  return (
+    <div className="
+    mt-10
+    bg-zinc-900
+    border
+    border-zinc-800
+    rounded-3xl
+    shadow-2xl
+    p-8
+    w-full
+    max-w-4xl
+    ">
+
+      <h2 className="text-3xl font-bold mb-2">
+        Security Pattern Studio
+      </h2>
+
+      <p className="text-gray-400 mb-6 text-sm max-w-2xl">
+        Procedurally generated <span className="text-gray-200">guilloché</span> art
+        — the kind of interwoven mathematical engraving used on real security
+        documents. It is fully deterministic: the same seed always produces the
+        same pattern, so a design keyed to a serial number can be regenerated and
+        compared. Abstract ornament only — not currency.
+      </p>
+
+      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <input
+          type="text"
+          value={seedInput}
+          onChange={(e) => setSeedInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") generate(); }}
+          placeholder="Seed (e.g. a serial number)"
+          className="
+          flex-1
+          bg-black
+          border
+          border-zinc-700
+          rounded-xl
+          px-4
+          py-3
+          text-sm
+          text-gray-200
+          font-mono
+          focus:outline-none
+          focus:border-indigo-500
+          "
+        />
+        <button
+          onClick={generate}
+          className="
+          bg-indigo-600
+          hover:bg-indigo-500
+          transition-all
+          duration-300
+          px-6
+          py-3
+          rounded-xl
+          text-sm
+          font-semibold
+          whitespace-nowrap
+          "
+        >
+          Generate Pattern
+        </button>
+      </div>
+
+      <div className="flex justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imgUrl}
+          alt={`Generated guilloché security pattern for seed ${appliedSeed}`}
+          className="
+          rounded-2xl
+          border
+          border-zinc-700
+          bg-white
+          w-full
+          max-w-md
+          aspect-square
+          object-contain
+          "
+        />
+      </div>
+
+      <p className="text-xs text-gray-600 mt-4 text-center font-mono">
+        seed: {appliedSeed}
+      </p>
 
     </div>
   );

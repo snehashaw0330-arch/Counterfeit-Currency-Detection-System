@@ -6,11 +6,11 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-02 (Phase I genai SHIPPED end-to-end; Phase J = security-pattern art is next)
+**Last updated:** 2026-06-02 (Phases I + J SHIPPED end-to-end; both committed)
 
-## ⏳ IN FLIGHT — resume here (post-compaction)
+## ✅ Phases I + J — DONE, shipped end-to-end
 
-**Phase I (GenAI explanation) — DONE, shipped end-to-end:**
+**Phase I (GenAI explanation) — committed (b70f89d):**
 - `backend/genai.py` — `explain(result)` → {summary, reasons, manual_checks, source}.
   Uses Claude **Haiku** (`claude-haiku-4-5`) with a cached system prompt +
   JSON-schema output when `ANTHROPIC_API_KEY` is set; **deterministic template
@@ -18,24 +18,30 @@ chat resumes with zero context loss. The full plan lives in
 - `backend/main.py` — `POST /explain` (takes a /predict result, returns the
   explanation; never fails the request) + the genai imports.
 - `requirements.txt` — added `anthropic` (installed: 0.105.2).
-- `tests/test_phase_i_genai.py` — **13 tests green** (force-template via monkeypatch
-  unset key; shape contract; never-raises on 8 garbage inputs; /explain endpoint).
+- `tests/test_phase_i_genai.py` — **13 tests green**.
 - `frontend/app/page.tsx` — **`ExplainPanel`** ("Explain with AI" button → POST
   /explain; shows summary + reasons + manual checks; AI vs RULE-BASED source badge).
-  Frontend typechecks clean (`tsc --noEmit` exit 0).
 - This is the project's honest "GenAI that does something good": explainability +
   accessibility (read-aloud), NOT counterfeit generation.
 
-**Phase J (NEXT — user explicitly chose this): generative security-pattern art.**
-- Build `backend/security_pattern.py` — procedural **guilloché / rosette /
-  microtext** generator (parametric hypotrochoids via numpy + PIL), deterministic
-  from a seed (seed can derive from a note serial). **Abstract art, NOT currency.**
-- Add `GET /security-pattern?seed=...` → returns a PNG (needs `Response` added to
-  the fastapi import in main.py). Add `tests/test_phase_j_pattern.py` (PNG magic
-  bytes, deterministic per seed, differs across seeds, never raises).
-- Context: user kept asking for "GenAI that makes notes that can't be cloned."
-  Explained that's not literally buildable/legal; they chose generative
-  security-pattern ART instead. **Do NOT generate realistic currency imagery.**
+**Phase J (generative security-pattern art) — shipped:**
+- `backend/security_pattern.py` — procedural **guilloché / rosette / micro-text**
+  generator. Spirograph (hypotrochoid) rosettes + sinusoidally-modulated woven
+  rings + a seed-derived micro-text ring, via numpy + PIL. `generate_pattern(seed,
+  size)` / `pattern_png(...)`. Seed accepts int OR string (SHA-256 → stable int,
+  so cross-machine reproducible). Size clamped [128,1200]. **Never raises**
+  (deterministic `_fallback_pattern`). **Abstract ornament only — NOT currency.**
+- `backend/main.py` — `GET /security-pattern?seed=...&size=...` → PNG (`Response`,
+  `Query` validation; out-of-range size → 422, never 500).
+- `tests/test_phase_j_pattern.py` — **15 tests green** (PNG magic bytes, determinism,
+  varies per seed, int==numeric-string, size clamp, never-raises on 7 weird seeds,
+  endpoint determinism/variation, 422 on bad size).
+- `frontend/app/page.tsx` — **`SecurityPatternStudio`** card (seed input → live
+  `<img>` of the generated guilloché). Sample: `docs/sample_security_pattern.png`.
+- Rationale: user kept asking for "GenAI that makes notes that can't be cloned."
+  That's not legally/literally buildable; this is the legitimate version — the
+  deterministic mathematical complexity (guilloché) that real security printing
+  uses, generated as abstract art. **Does NOT generate currency imagery.**
 
 ## Phase F result + capstone report (latest)
 
@@ -198,6 +204,16 @@ Decision pending from user on whether to add an optional augmentation phase.
 
 ## Session log (most recent first)
 
+- **2026-06-02 (9)** — **Phases I + J shipped end-to-end.** Phase I: tested
+  (`tests/test_phase_i_genai.py`, 13 green) and committed the GenAI explanation
+  layer (`backend/genai.py` + `POST /explain`) and added the frontend
+  `ExplainPanel`. Phase J: built `backend/security_pattern.py` (procedural
+  guilloché/rosette/micro-text art, deterministic per seed, never raises),
+  `GET /security-pattern` PNG endpoint, `tests/test_phase_j_pattern.py` (15
+  green), and the frontend `SecurityPatternStudio` card. Frontend typechecks
+  clean. 49/49 in the I+J+api+forensic subset green. Both are the honest
+  answer to the user's "GenAI" ask — explainability + abstract security-pattern
+  art, never counterfeit generation.
 - **2026-06-01 (8)** — Phase G (backend half): refactored `/predict` verdict
   into a shared `_analyze()`; added upload validation (empty / 25 MB cap /
   unreadable → clean error, no 500s); new **`/diagnose`** endpoint (superset of

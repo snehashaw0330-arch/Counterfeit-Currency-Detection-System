@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Body
+from fastapi import FastAPI, UploadFile, File, Body, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 import importlib
@@ -20,6 +20,7 @@ import threading
 from backend.forensic import run_forensic_pipeline, warmup_ocr, diagnostics
 from backend.classical import predict_classical, warmup_classical
 from backend.genai import explain as genai_explain, llm_available
+from backend.security_pattern import pattern_png
 
 # Reject absurd uploads early (DoS / accidental huge files). 25 MB
 # comfortably covers a high-res phone photo.
@@ -306,3 +307,21 @@ async def explain_result(payload: dict = Body(...)):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# =====================================================
+# SECURITY-PATTERN ART (generative) — Phase J
+# =====================================================
+
+@app.get("/security-pattern")
+def security_pattern(
+    seed: str = Query("0", description="Any text/number; same seed → same art"),
+    size: int = Query(600, ge=128, le=1200),
+):
+    """Procedurally generate an ABSTRACT guilloché / rosette security-pattern
+    artwork and return it as a PNG. Deterministic per seed (a seed can be
+    derived from a serial number, so the pattern can be regenerated and compared
+    for verification). This is generative *security-pattern art* — it does NOT
+    produce currency imagery."""
+    png = pattern_png(seed, size)
+    return Response(content=png, media_type="image/png")
