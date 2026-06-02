@@ -5,6 +5,7 @@ techniques** plus an explainable, visible-light forensic pipeline. A phone
 photo of a note returns a single verdict — **REAL / SUSPICIOUS / FAKE** —
 backed by per-feature evidence.
 
+> **Project report:** [docs/REPORT.md](docs/REPORT.md) (submission-grade capstone).
 > **Planning docs:** the master plan is [docs/PROJECT_SCOPE.md](docs/PROJECT_SCOPE.md);
 > current state + session handoff is [docs/STATUS.md](docs/STATUS.md);
 > phase history is [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md);

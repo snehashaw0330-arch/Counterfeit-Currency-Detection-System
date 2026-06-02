@@ -6,7 +6,20 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-01 (Phase E micro-print + forensic features folded into ML)
+**Last updated:** 2026-06-01 (Phase F retrain = negative; capstone REPORT written)
+
+## Phase F result + capstone report (latest)
+
+- **Phase F (retrain CNN) — DONE, negative.** `scripts/train_cnn.py`: transfer-
+  learning retrain (frozen MobileNetV2 + head, augmented) scored **0.550 test
+  macro-F1 vs current 0.564** — worse (catches 1/6 fakes). **Not adopted**;
+  production model kept. `models/*_v2.keras` git-ignored. Third confirmation of
+  the data ceiling (after weak Phase-E checks + failed ORB motifs).
+- **Capstone: `docs/REPORT.md`** — submission-grade project report (abstract,
+  architecture, methodology, brief-traceability, full results incl. the honest
+  negative results, limitations, future work, reproducibility).
+- **Verdict recalibration (Phase F.2) is the main remaining model-side task** —
+  deferred until the dataset is larger (ROC-based threshold selection).
 
 ## Phase E so far (visible-light security features)
 
@@ -156,6 +169,9 @@ Decision pending from user on whether to add an optional augmentation phase.
 
 ## Session log (most recent first)
 
+- **2026-06-01 (7)** — Phase F: retrained MobileNetV2 (transfer learning) →
+  0.550, worse than 0.564, NOT adopted (data ceiling). Wrote capstone
+  `docs/REPORT.md`. Git-ignored `models/*_v2.keras`.
 - **2026-06-01 (6)** — Phase E: shipped honest micro-print check; folded 3 OCR-free
   forensic signals into the 50-dim ML vector (RF → 0.742, now live 2nd opinion);
   rejected unreliable ORB motif matching (would false-fail reals). Added
