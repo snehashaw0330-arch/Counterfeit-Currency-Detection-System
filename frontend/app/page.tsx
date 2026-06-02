@@ -74,6 +74,20 @@ type PredictResponse = {
   message?: string;
 };
 
+type Explanation = {
+  summary: string;
+  reasons: string[];
+  manual_checks: string[];
+  source: "llm" | "template";
+};
+
+type ExplainResponse = {
+  status: "success" | "error";
+  llm_available?: boolean;
+  explanation?: Explanation;
+  message?: string;
+};
+
 const VERDICT_COLOR: Record<string, string> = {
   REAL: "text-green-400",
   FAKE: "text-red-400",
@@ -485,6 +499,12 @@ export default function Home() {
               </div>
 
             </div>
+
+            {/* ================================================= */}
+            {/* EXPLAIN WITH AI (Phase I) */}
+            {/* ================================================= */}
+
+            <ExplainPanel result={result} />
 
             {/* ================================================= */}
             {/* ML TECHNIQUE COMPARISON (Phase D) */}
@@ -1097,6 +1117,165 @@ function ModelComparisonPanel({ models }: { models?: MlModels }) {
         Second opinion shown for transparency — does not change the
         combined verdict above.
       </p>
+
+    </div>
+  );
+}
+
+// =====================================================
+// EXPLAIN WITH AI PANEL (Phase I)
+// =====================================================
+// Turns the structured verdict into a plain-language, accessibility-first
+// explanation (the use case both reference papers targeted) plus manual
+// verification steps. Calls POST /explain, which uses Claude when an API key
+// is configured and otherwise returns a deterministic template — so the panel
+// always works locally. This is the project's "GenAI that does something good":
+// explainability, NOT counterfeit generation.
+
+function ExplainPanel({ result }: { result: PredictResponse }) {
+
+  const [loading, setLoading] = useState(false);
+  const [explanation, setExplanation] = useState<Explanation | null>(null);
+  const [source, setSource] = useState<"llm" | "template" | null>(null);
+  const [error, setError] = useState<string>("");
+
+  const handleExplain = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const response = await axios.post<ExplainResponse>(
+        "http://127.0.0.1:8000/explain",
+        result,
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      if (response.data.status === "success" && response.data.explanation) {
+        setExplanation(response.data.explanation);
+        setSource(response.data.explanation.source);
+      } else {
+        setError(response.data.message ?? "Could not generate an explanation.");
+      }
+    } catch {
+      setError("Backend connection failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-8 bg-zinc-900 p-5 rounded-2xl border border-zinc-700">
+
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-bold">Explain with AI</h3>
+        {source && (
+          <span
+            className={`text-xs font-bold px-3 py-1 rounded-full border ${
+              source === "llm"
+                ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
+                : "bg-zinc-700/40 text-gray-300 border-zinc-600"
+            }`}
+          >
+            {source === "llm" ? "AI GENERATED" : "RULE-BASED SUMMARY"}
+          </span>
+        )}
+      </div>
+
+      {!explanation && (
+        <p className="text-sm text-gray-400 mb-4">
+          Get a plain-language summary of why this verdict was reached, plus
+          manual checks you can do by hand. Designed to be read aloud.
+        </p>
+      )}
+
+      <button
+        onClick={handleExplain}
+        disabled={loading}
+        className="
+        bg-indigo-600
+        hover:bg-indigo-500
+        disabled:opacity-60
+        transition-all
+        duration-300
+        px-5
+        py-2.5
+        rounded-xl
+        text-sm
+        font-semibold
+        "
+      >
+        {loading
+          ? "Generating explanation..."
+          : explanation
+            ? "Regenerate explanation"
+            : "Explain this result"}
+      </button>
+
+      {error && (
+        <p className="text-sm text-red-400 mt-3">{error}</p>
+      )}
+
+      {explanation && (
+        <div className="mt-5 space-y-5">
+
+          {/* ---- Summary ---- */}
+          <div>
+            <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">
+              Summary
+            </p>
+            <p className="text-base text-gray-200 leading-relaxed">
+              {explanation.summary}
+            </p>
+          </div>
+
+          {/* ---- Reasons ---- */}
+          {explanation.reasons.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider">
+                Why
+              </p>
+              <ul className="space-y-1.5">
+                {explanation.reasons.map((r, i) => (
+                  <li
+                    key={i}
+                    className="text-sm text-gray-300 flex gap-2 leading-relaxed"
+                  >
+                    <span className="text-indigo-400 mt-0.5">•</span>
+                    <span>{r}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* ---- Manual checks ---- */}
+          {explanation.manual_checks.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider">
+                Check it by hand
+              </p>
+              <ul className="space-y-1.5">
+                {explanation.manual_checks.map((m, i) => (
+                  <li
+                    key={i}
+                    className="text-sm text-gray-300 flex gap-2 leading-relaxed"
+                  >
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span>{m}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-600">
+            Screening aid only — software on a phone photo can be wrong,
+            especially on high-quality fakes. Always verify by hand when it
+            matters.
+          </p>
+
+        </div>
+      )}
 
     </div>
   );

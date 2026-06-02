@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Body
 from fastapi.middleware.cors import CORSMiddleware
 
 import importlib
@@ -19,6 +19,7 @@ import threading
 
 from backend.forensic import run_forensic_pipeline, warmup_ocr, diagnostics
 from backend.classical import predict_classical, warmup_classical
+from backend.genai import explain as genai_explain, llm_available
 
 # Reject absurd uploads early (DoS / accidental huge files). 25 MB
 # comfortably covers a high-res phone photo.
@@ -285,4 +286,23 @@ async def diagnose_currency(file: UploadFile = File(...)):
 
     except Exception as e:
         print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}
+
+
+# =====================================================
+# EXPLAIN (GenAI explanation & accessibility) — Phase I
+# =====================================================
+
+@app.post("/explain")
+async def explain_result(payload: dict = Body(...)):
+    """Take a /predict result and return a plain-language explanation plus
+    manual-verification guidance. Uses Claude when ANTHROPIC_API_KEY is set,
+    otherwise a deterministic template. Never fails the request."""
+    try:
+        return {
+            "status": "success",
+            "llm_available": llm_available(),
+            "explanation": genai_explain(payload),
+        }
+    except Exception as e:
         return {"status": "error", "message": str(e)}

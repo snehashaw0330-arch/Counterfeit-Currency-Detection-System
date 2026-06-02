@@ -6,7 +6,36 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-01 (Phase F retrain = negative; capstone REPORT written)
+**Last updated:** 2026-06-02 (Phase I genai SHIPPED end-to-end; Phase J = security-pattern art is next)
+
+## ⏳ IN FLIGHT — resume here (post-compaction)
+
+**Phase I (GenAI explanation) — DONE, shipped end-to-end:**
+- `backend/genai.py` — `explain(result)` → {summary, reasons, manual_checks, source}.
+  Uses Claude **Haiku** (`claude-haiku-4-5`) with a cached system prompt +
+  JSON-schema output when `ANTHROPIC_API_KEY` is set; **deterministic template
+  fallback** otherwise. Never raises. (Built via the claude-api skill.)
+- `backend/main.py` — `POST /explain` (takes a /predict result, returns the
+  explanation; never fails the request) + the genai imports.
+- `requirements.txt` — added `anthropic` (installed: 0.105.2).
+- `tests/test_phase_i_genai.py` — **13 tests green** (force-template via monkeypatch
+  unset key; shape contract; never-raises on 8 garbage inputs; /explain endpoint).
+- `frontend/app/page.tsx` — **`ExplainPanel`** ("Explain with AI" button → POST
+  /explain; shows summary + reasons + manual checks; AI vs RULE-BASED source badge).
+  Frontend typechecks clean (`tsc --noEmit` exit 0).
+- This is the project's honest "GenAI that does something good": explainability +
+  accessibility (read-aloud), NOT counterfeit generation.
+
+**Phase J (NEXT — user explicitly chose this): generative security-pattern art.**
+- Build `backend/security_pattern.py` — procedural **guilloché / rosette /
+  microtext** generator (parametric hypotrochoids via numpy + PIL), deterministic
+  from a seed (seed can derive from a note serial). **Abstract art, NOT currency.**
+- Add `GET /security-pattern?seed=...` → returns a PNG (needs `Response` added to
+  the fastapi import in main.py). Add `tests/test_phase_j_pattern.py` (PNG magic
+  bytes, deterministic per seed, differs across seeds, never raises).
+- Context: user kept asking for "GenAI that makes notes that can't be cloned."
+  Explained that's not literally buildable/legal; they chose generative
+  security-pattern ART instead. **Do NOT generate realistic currency imagery.**
 
 ## Phase F result + capstone report (latest)
 
