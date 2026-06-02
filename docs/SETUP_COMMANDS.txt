@@ -1,8 +1,14 @@
 # Counterfeit Currency Detection - Setup Commands
 
 ---
+# QUICK START (one command — opens backend + frontend in separate windows)
+powershell -ExecutionPolicy Bypass -File scripts\run_local.ps1
+
+# Or manually:
 venv\Scripts\Activate
 uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+# Endpoints: POST /predict (verdict) ; POST /diagnose (verdict + raw OCR tokens)
 
 # 0. Prerequisites (one-time, system level)
 
