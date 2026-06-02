@@ -17,8 +17,12 @@ import io
 import os
 import threading
 
-from backend.forensic import run_forensic_pipeline, warmup_ocr
+from backend.forensic import run_forensic_pipeline, warmup_ocr, diagnostics
 from backend.classical import predict_classical, warmup_classical
+
+# Reject absurd uploads early (DoS / accidental huge files). 25 MB
+# comfortably covers a high-res phone photo.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 # =====================================================
 # FASTAPI APP
@@ -112,222 +116,173 @@ def home():
         "Counterfeit Currency Detection Backend Running"
     }
 
+
+# =====================================================
+# IMAGE LOADING + VALIDATION
+# =====================================================
+
+def _decode_upload(image_bytes):
+    """Validate and decode an upload into (rgb_array, bgr_image).
+
+    Raises ValueError with a user-facing message on bad input so the
+    endpoints can return a clean error (never a 500 / stack trace)."""
+
+    if not image_bytes:
+        raise ValueError("Empty upload — no file received")
+
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        raise ValueError(
+            f"Image too large ({len(image_bytes) // (1024 * 1024)} MB); "
+            f"maximum is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB"
+        )
+
+    try:
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception:
+        raise ValueError("File is not a readable image")
+
+    rgb_array = np.array(pil_image)
+    bgr_image = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2BGR)
+    return rgb_array, bgr_image
+
+
+# =====================================================
+# CORE ANALYSIS (shared by /predict and /diagnose)
+# =====================================================
+
+def _analyze(rgb_array, bgr_image):
+    """Run the CNN + forensic pipeline + classical second opinion and
+    compute the combined REAL / SUSPICIOUS / FAKE verdict. Returns the
+    success payload dict. Pure logic — no request handling — so both
+    /predict and /diagnose share exactly one implementation."""
+
+    model_input = np.expand_dims(
+        cv2.resize(rgb_array, (224, 224)) / 255.0, axis=0
+    )
+    prediction = float(model.predict(model_input)[0][0])
+
+    # ---- model (CNN) verdict ----
+    if prediction >= 0.5:
+        model_verdict = "REAL"
+        model_confidence = round(prediction * 100, 2)
+    else:
+        model_verdict = "FAKE"
+        model_confidence = round((1 - prediction) * 100, 2)
+
+    # ---- forensic pipeline ----
+    forensic_analysis = run_forensic_pipeline(bgr_image)
+
+    scored_checks = [
+        c for k, c in forensic_analysis.items()
+        if k != "modular_ai_pipeline" and c["status"] in ("PASS", "FAIL")
+    ]
+    pass_count = sum(1 for c in scored_checks if c["status"] == "PASS")
+    total = max(len(scored_checks), 1)
+    forensic_score = pass_count / total
+
+    # Forensic outweighs the CNN (the classifier is brittle on
+    # out-of-distribution inputs), so 0.6 / 0.4.
+    combined_score = 0.4 * prediction + 0.6 * forensic_score
+
+    # Hard gates: structural sanity (not a banknote at all), colour
+    # palette (desaturated/inverted), and proportions (stretched /
+    # wrong-size) each veto a REAL verdict.
+    structural_failed = (
+        forensic_analysis.get("structural_sanity", {}).get("status") == "FAIL"
+    )
+    colour_failed = (
+        forensic_analysis.get("hologram_detection", {}).get("status") == "FAIL"
+    )
+    proportion_failed = (
+        forensic_analysis.get("proportion_analysis", {}).get("status") == "FAIL"
+    )
+
+    if structural_failed:
+        final_verdict = "FAKE"
+    elif (
+        combined_score >= 0.65
+        and pass_count >= 5
+        and not colour_failed
+        and not proportion_failed
+    ):
+        final_verdict = "REAL"
+    elif combined_score < 0.35 or (prediction < 0.35 and forensic_score < 0.35):
+        final_verdict = "FAKE"
+    else:
+        final_verdict = "SUSPICIOUS"
+
+    final_confidence = round(max(combined_score, 1 - combined_score) * 100, 2)
+
+    # ---- classical ML second opinion (display-only) ----
+    classical = predict_classical(bgr_image)
+    ml_models = {
+        "cnn": {
+            "verdict": model_verdict,
+            "confidence": f"{model_confidence:.2f}%",
+            "prob_genuine": prediction,
+        },
+        "classical": classical,
+        "agreement": (
+            classical["verdict"] == model_verdict
+            if classical.get("available") else None
+        ),
+    }
+
+    return {
+        "status": "success",
+        "prediction": final_verdict,
+        "confidence": f"{final_confidence:.2f}%",
+        "raw_prediction": prediction,
+        "model_verdict": model_verdict,
+        "model_confidence": f"{model_confidence:.2f}%",
+        "forensic_score": round(forensic_score * 100, 2),
+        "forensic_pass_count": pass_count,
+        "forensic_total_checks": total,
+        "ml_models": ml_models,
+        "forensic_analysis": forensic_analysis,
+    }
+
+
 # =====================================================
 # PREDICT CURRENCY
 # =====================================================
 
 @app.post("/predict")
-async def predict_currency(
-    file: UploadFile = File(...)
-):
+async def predict_currency(file: UploadFile = File(...)):
 
     try:
+        rgb_array, bgr_image = _decode_upload(await file.read())
+        return _analyze(rgb_array, bgr_image)
 
-        image_bytes = await file.read()
-
-        # Decode once into a BGR cv2 image (used for forensic
-        # pipeline at original resolution) and a 224x224 tensor
-        # (used for the MobileNetV2 classifier).
-
-        pil_image = Image.open(
-            io.BytesIO(image_bytes)
-        ).convert("RGB")
-
-        rgb_array = np.array(pil_image)
-
-        bgr_image = cv2.cvtColor(
-            rgb_array,
-            cv2.COLOR_RGB2BGR
-        )
-
-        # Model input
-
-        model_input = cv2.resize(
-            rgb_array,
-            (224, 224)
-        ) / 255.0
-
-        model_input = np.expand_dims(model_input, axis=0)
-
-        print(
-            "Processed Shape:",
-            model_input.shape
-        )
-
-        prediction = model.predict(model_input)[0][0]
-
-        print(
-            "Raw Prediction:",
-            prediction
-        )
-
-        # =============================================
-        # MODEL VERDICT (raw ML output)
-        # =============================================
-
-        if prediction >= 0.5:
-            model_verdict = "REAL"
-            model_confidence = round(prediction * 100, 2)
-        else:
-            model_verdict = "FAKE"
-            model_confidence = round((1 - prediction) * 100, 2)
-
-        # =============================================
-        # FORENSIC PIPELINE
-        # =============================================
-
-        forensic_analysis = run_forensic_pipeline(bgr_image)
-
-        # =============================================
-        # COMBINED VERDICT
-        # =============================================
-        # Aggregate forensic checks. The model alone has
-        # ~97% val accuracy on its training distribution
-        # but is brittle on out-of-distribution photos,
-        # so we cross-check against the forensic features.
-
-        scored_checks = [
-            c for k, c in forensic_analysis.items()
-            if k != "modular_ai_pipeline"
-            and c["status"] in ("PASS", "FAIL")
-        ]
-
-        pass_count = sum(
-            1 for c in scored_checks if c["status"] == "PASS"
-        )
-
-        total = max(len(scored_checks), 1)
-
-        forensic_score = pass_count / total
-
-        # Forensic now weighs more than the ML output. The
-        # classifier is unreliable on out-of-distribution
-        # inputs (it approves pure noise and colour-inverted
-        # notes at 95%+), so we trust the independent
-        # forensic checks more heavily.
-        combined_score = (
-            0.4 * float(prediction) + 0.6 * forensic_score
-        )
-
-        # Hard gate: structural_sanity FAIL means the image
-        # is not plausibly a banknote at all (blank, noise,
-        # half-cropped). Override the verdict outright.
-        sanity = forensic_analysis.get("structural_sanity", {})
-        structural_failed = sanity.get("status") == "FAIL"
-
-        # The colour-richness check (kept under the legacy
-        # hologram_detection key for API stability) is a
-        # palette-integrity signal. If it fails we have a
-        # desaturated / inverted / hue-shifted print — the
-        # ML model is colour-blind so we must veto REAL here.
-        colour = forensic_analysis.get("hologram_detection", {})
-        colour_failed = colour.get("status") == "FAIL"
-
-        # Proportion FAIL means the note's measured aspect
-        # doesn't match the canonical RBI dimensions for the
-        # OCR'd denomination — a digital stretch or wrong-size
-        # paper. Strong fakery signal; vetoes REAL the same
-        # way colour failure does.
-        proportion = forensic_analysis.get("proportion_analysis", {})
-        proportion_failed = proportion.get("status") == "FAIL"
-
-        # A REAL verdict requires:
-        #   - structural sanity OK
-        #   - combined score >= 0.65
-        #   - at least 5 forensic checks PASS
-        #     (reverse-side notes naturally lack OCR/face/
-        #     denomination, so requiring more punishes them)
-        #   - colour palette intact
-        #   - proportions match canonical for the denomination
-
-        if structural_failed:
-            final_verdict = "FAKE"
-        elif (
-            combined_score >= 0.65
-            and pass_count >= 5
-            and not colour_failed
-            and not proportion_failed
-        ):
-            final_verdict = "REAL"
-        elif combined_score < 0.35 or (
-            float(prediction) < 0.35 and forensic_score < 0.35
-        ):
-            final_verdict = "FAKE"
-        else:
-            final_verdict = "SUSPICIOUS"
-
-        final_confidence = round(
-            max(combined_score, 1 - combined_score) * 100,
-            2
-        )
-
-        # =============================================
-        # MACHINE LEARNING TECHNIQUES (multi-model view)
-        # =============================================
-        # The classical model (best technique from Phase D —
-        # SVM/RandomForest/KNN/LogReg, see docs/BENCHMARK.md) runs
-        # as an INDEPENDENT SECOND OPINION on hand-crafted visual
-        # features. It is surfaced for transparency and to satisfy
-        # the "various ML techniques" scope; it does NOT alter the
-        # combined verdict here — fusion-weight recalibration is
-        # Phase F (docs/PROJECT_SCOPE.md). Never breaks /predict.
-
-        classical = predict_classical(bgr_image)
-
-        ml_models = {
-            "cnn": {
-                "verdict": model_verdict,
-                "confidence": f"{model_confidence:.2f}%",
-                "prob_genuine": float(prediction),
-            },
-            "classical": classical,
-            "agreement": (
-                classical["verdict"] == model_verdict
-                if classical.get("available") else None
-            ),
-        }
-
-        # =============================================
-        # FINAL RESPONSE
-        # =============================================
-
-        return {
-
-            "status": "success",
-
-            "prediction": final_verdict,
-
-            "confidence": f"{final_confidence:.2f}%",
-
-            "raw_prediction": float(prediction),
-
-            "model_verdict": model_verdict,
-
-            "model_confidence": f"{model_confidence:.2f}%",
-
-            "forensic_score": round(forensic_score * 100, 2),
-
-            "forensic_pass_count": pass_count,
-
-            "forensic_total_checks": total,
-
-            "ml_models": ml_models,
-
-            "forensic_analysis": forensic_analysis
-        }
+    except ValueError as ve:
+        # Expected, user-facing validation problems.
+        return {"status": "error", "message": str(ve)}
 
     except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}
 
-        print(
-            "\nERROR:",
-            str(e)
-        )
 
-        return {
+# =====================================================
+# DIAGNOSE (raw OCR + per-check intermediates) — Phase G
+# =====================================================
 
-            "status": "error",
+@app.post("/diagnose")
+async def diagnose_currency(file: UploadFile = File(...)):
+    """Superset of /predict for debugging and demos: the same verdict
+    plus a `diagnostics` block with the raw EasyOCR tokens and the
+    located-note size, so you can see exactly what the OCR read and
+    why a serial / denomination came out the way it did."""
 
-            "message":
-            str(e)
-        }
+    try:
+        rgb_array, bgr_image = _decode_upload(await file.read())
+        result = _analyze(rgb_array, bgr_image)
+        result["diagnostics"] = diagnostics(bgr_image)
+        return result
 
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+
+    except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}

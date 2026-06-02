@@ -2711,6 +2711,45 @@ def _classify_denomination_tesseract(image):
 
 
 # =====================================================
+# DIAGNOSTICS (for the /diagnose endpoint, Phase G)
+# =====================================================
+
+def diagnostics(image):
+    """Raw OCR + intermediate values for debugging / transparency.
+
+    Surfaces exactly what EasyOCR read on the located note so a user
+    can see WHY a serial / denomination came out the way it did.
+    Never raises — returns a partially-populated dict on any error."""
+
+    out = {
+        "easyocr_available": EASYOCR_AVAILABLE,
+        "located_note_size": None,
+        "ocr_tokens": [],
+    }
+
+    try:
+        note = _locate_note(_ensure_bgr(image))
+    except Exception:
+        return out
+
+    out["located_note_size"] = list(note.shape[:2])  # [h, w]
+
+    try:
+        words = _easyocr_words(note)
+    except Exception:
+        words = None
+
+    if words:
+        out["ocr_tokens"] = [
+            {"text": w["text"], "conf": w["conf"],
+             "x": w["x"], "y": w["y"]}
+            for w in words
+        ]
+
+    return out
+
+
+# =====================================================
 # PIPELINE ORCHESTRATOR
 # =====================================================
 

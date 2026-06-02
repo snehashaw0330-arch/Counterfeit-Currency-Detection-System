@@ -169,6 +169,12 @@ Decision pending from user on whether to add an optional augmentation phase.
 
 ## Session log (most recent first)
 
+- **2026-06-01 (8)** — Phase G (backend half): refactored `/predict` verdict
+  into a shared `_analyze()`; added upload validation (empty / 25 MB cap /
+  unreadable → clean error, no 500s); new **`/diagnose`** endpoint (superset of
+  /predict + raw EasyOCR tokens via `forensic.diagnostics()`). 6/6 API tests
+  green (incl. 2 new). Remaining Phase G: frontend region overlays (needs the
+  backend to return bbox coords), one-command launch script.
 - **2026-06-01 (7)** — Phase F: retrained MobileNetV2 (transfer learning) →
   0.550, worse than 0.564, NOT adopted (data ceiling). Wrote capstone
   `docs/REPORT.md`. Git-ignored `models/*_v2.keras`.

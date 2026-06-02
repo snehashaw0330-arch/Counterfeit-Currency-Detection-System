@@ -87,6 +87,40 @@ def test_predict_handles_invalid_image(client):
     assert body["status"] in {"success", "error"}
 
 
+def test_diagnose_returns_diagnostics(client, synthetic_note_bytes):
+
+    response = client.post(
+        "/diagnose",
+        files={"file": ("note.jpg", synthetic_note_bytes, "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["status"] == "success"
+    assert body["prediction"] in {"REAL", "FAKE", "SUSPICIOUS"}
+
+    # /diagnose is a superset of /predict — it adds the raw diagnostics.
+    assert "diagnostics" in body
+    diag = body["diagnostics"]
+    for key in ("ocr_tokens", "located_note_size", "easyocr_available"):
+        assert key in diag, f"missing diagnostics key {key}"
+    assert isinstance(diag["ocr_tokens"], list)
+
+
+def test_predict_rejects_empty_upload(client):
+
+    response = client.post(
+        "/predict",
+        files={"file": ("empty.jpg", b"", "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "error"
+    assert "message" in body
+
+
 def test_predict_blank_image_is_not_real(
     client, blank_image
 ):
