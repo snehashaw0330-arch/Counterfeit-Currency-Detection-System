@@ -17,7 +17,12 @@ import io
 import os
 import threading
 
-from backend.forensic import run_forensic_pipeline, warmup_ocr, diagnostics
+from backend.forensic import (
+    run_forensic_pipeline,
+    warmup_ocr,
+    diagnostics,
+    assess_readability,
+)
 from backend.classical import predict_classical, warmup_classical
 from backend.genai import explain as genai_explain, llm_available
 from backend.security_pattern import pattern_png
@@ -200,18 +205,32 @@ def _analyze(rgb_array, bgr_image):
     )
 
     if structural_failed:
-        final_verdict = "FAKE"
+        security_verdict = "FAKE"
     elif (
         combined_score >= 0.65
         and pass_count >= 5
         and not colour_failed
         and not proportion_failed
     ):
-        final_verdict = "REAL"
+        security_verdict = "REAL"
     elif combined_score < 0.35 or (prediction < 0.35 and forensic_score < 0.35):
-        final_verdict = "FAKE"
+        security_verdict = "FAKE"
     else:
-        final_verdict = "SUSPICIOUS"
+        security_verdict = "SUSPICIOUS"
+
+    # ---- honesty / readability overlay ----
+    # A "REAL"/"SUSPICIOUS" verdict only means something if we could
+    # actually read the note. When we couldn't read ANY identity
+    # signal (serial, proportions, denomination) the honest answer is
+    # "can't verify — retake", NOT a confident REAL. A clear FAKE
+    # (gross structural/colour/score failure) is kept, because those
+    # gates don't need OCR and are honest signals on their own.
+    readability = assess_readability(bgr_image, forensic_analysis)
+
+    if security_verdict in ("REAL", "SUSPICIOUS") and readability["level"] == "none":
+        final_verdict = "UNVERIFIED"
+    else:
+        final_verdict = security_verdict
 
     final_confidence = round(max(combined_score, 1 - combined_score) * 100, 2)
 
@@ -233,6 +252,10 @@ def _analyze(rgb_array, bgr_image):
     return {
         "status": "success",
         "prediction": final_verdict,
+        "security_verdict": security_verdict,
+        "verification_level": readability["level"],
+        "verification": readability,
+        "guidance": readability["guidance"],
         "confidence": f"{final_confidence:.2f}%",
         "raw_prediction": prediction,
         "model_verdict": model_verdict,

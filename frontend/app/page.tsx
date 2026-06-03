@@ -59,9 +59,26 @@ type MlModels = {
   agreement: boolean | null;
 };
 
+type Verification = {
+  level: "full" | "partial" | "none";
+  note_located: boolean;
+  resolution_px: number;
+  serial_read: boolean;
+  proportions_measured: boolean;
+  denomination_read: boolean;
+  unread: string[];
+  guidance: string;
+};
+
+type Verdict = "REAL" | "FAKE" | "SUSPICIOUS" | "UNVERIFIED";
+
 type PredictResponse = {
   status: "success" | "error";
-  prediction?: "REAL" | "FAKE" | "SUSPICIOUS";
+  prediction?: Verdict;
+  security_verdict?: "REAL" | "FAKE" | "SUSPICIOUS";
+  verification_level?: "full" | "partial" | "none";
+  verification?: Verification;
+  guidance?: string;
   confidence?: string;
   raw_prediction?: number;
   model_verdict?: "REAL" | "FAKE";
@@ -92,6 +109,43 @@ const VERDICT_COLOR: Record<string, string> = {
   REAL: "text-green-400",
   FAKE: "text-red-400",
   SUSPICIOUS: "text-yellow-400",
+  UNVERIFIED: "text-orange-400",
+};
+
+// Human-facing verdict presentation. The internal verdict strings are
+// engineer-speak; a normal user needs a plain headline + a one-line meaning.
+const VERDICT_DISPLAY: Record<
+  string,
+  { headline: string; sub: string; accent: string; bg: string; border: string }
+> = {
+  REAL: {
+    headline: "Likely Genuine",
+    sub: "Most security checks passed. Not a guarantee — confirm by hand if it matters.",
+    accent: "text-green-400",
+    bg: "bg-green-500/10",
+    border: "border-green-500/40",
+  },
+  FAKE: {
+    headline: "Likely Fake",
+    sub: "One or more important checks failed. Treat with caution and verify by hand.",
+    accent: "text-red-400",
+    bg: "bg-red-500/10",
+    border: "border-red-500/40",
+  },
+  SUSPICIOUS: {
+    headline: "Couldn't Confirm",
+    sub: "Some checks were unclear. Treat as suspicious and verify by hand before accepting.",
+    accent: "text-yellow-400",
+    bg: "bg-yellow-500/10",
+    border: "border-yellow-500/40",
+  },
+  UNVERIFIED: {
+    headline: "Can't Verify This Photo",
+    sub: "The image was too unclear to read the note. Please retake the photo and try again.",
+    accent: "text-orange-400",
+    bg: "bg-orange-500/10",
+    border: "border-orange-500/40",
+  },
 };
 
 export default function Home() {
@@ -355,87 +409,45 @@ export default function Home() {
           p-6
           ">
 
-            <h2 className="
-            text-3xl
-            font-bold
-            mb-8
-            text-center
-            ">
+            {/* ================================================= */}
+            {/* VERDICT BANNER — plain-language hero (Phase K) */}
+            {/* ================================================= */}
 
-              Detection Result
+            <VerdictBanner result={result} />
 
-            </h2>
+            {/* ================================================= */}
+            {/* WHAT WE FOUND — grouped plain findings (Phase K) */}
+            {/* ================================================= */}
 
-            {/* RESULT GRID */}
+            <PlainFindings result={result} />
 
-            <div className="
-            grid
-            grid-cols-1
-            md:grid-cols-2
-            gap-6
-            ">
+            {/* ================================================= */}
+            {/* EXPLAIN WITH AI (Phase I) — plain explanation */}
+            {/* ================================================= */}
 
-              {/* FINAL VERDICT */}
+            <ExplainPanel result={result} />
 
-              <div className="
+            {/* ================================================= */}
+            {/* TECHNICAL DETAILS (collapsible) — for power users */}
+            {/* ================================================= */}
+
+            <details className="mt-8">
+              <summary className="
+              cursor-pointer
+              select-none
+              text-sm
+              font-semibold
+              text-gray-300
               bg-zinc-900
-              p-5
-              rounded-2xl
               border
               border-zinc-700
+              rounded-xl
+              px-4
+              py-3
+              hover:bg-zinc-800
               ">
-
-                <h3 className="text-gray-400 mb-2">
-                  Final Verdict
-                </h3>
-
-                <p
-                  className={`
-                  text-3xl
-                  font-bold
-                  ${VERDICT_COLOR[result.prediction ?? ""]
-                    ?? "text-gray-300"}
-                  `}
-                >
-                  {result.prediction}
-                </p>
-
-                <p className="text-xs text-gray-500 mt-2">
-                  Model + Forensic combined
-                </p>
-
-              </div>
-
-              {/* CONFIDENCE */}
-
-              <div className="
-              bg-zinc-900
-              p-5
-              rounded-2xl
-              border
-              border-zinc-700
-              ">
-
-                <h3 className="text-gray-400 mb-2">
-                  Confidence
-                </h3>
-
-                <p className="
-                text-3xl
-                font-bold
-                text-yellow-400
-                ">
-                  {result.confidence}
-                </p>
-
-                <p className="text-xs text-gray-500 mt-2">
-                  Forensic pass: {result.forensic_pass_count ?? 0}
-                  /{result.forensic_total_checks ?? 0}
-                </p>
-
-              </div>
-
-            </div>
+                Technical details — forensic checks, ML models, raw numbers
+              </summary>
 
             {/* MODEL BREAKDOWN */}
 
@@ -499,12 +511,6 @@ export default function Home() {
               </div>
 
             </div>
-
-            {/* ================================================= */}
-            {/* EXPLAIN WITH AI (Phase I) */}
-            {/* ================================================= */}
-
-            <ExplainPanel result={result} />
 
             {/* ================================================= */}
             {/* ML TECHNIQUE COMPARISON (Phase D) */}
@@ -780,6 +786,7 @@ export default function Home() {
 
               </div>
             </div>
+            </details>
           </div>
         )}
       </div>
@@ -1401,6 +1408,217 @@ function SecurityPatternStudio() {
       <p className="text-xs text-gray-600 mt-4 text-center font-mono">
         seed: {appliedSeed}
       </p>
+
+    </div>
+  );
+}
+
+// =====================================================
+// VERDICT BANNER (Phase K)
+// =====================================================
+// The plain-language hero of the result. A normal user reads this and
+// knows what to do — without parsing 11 technical checks. Handles the
+// honest "Can't verify — retake" state and the "limited check" caveat.
+
+const RETAKE_TIPS = [
+  "Fill the frame with the note (get close).",
+  "Use good, even light — avoid glare and shadows.",
+  "Lay the note flat and hold the camera straight above it.",
+  "Make sure both serial numbers are sharp and in focus.",
+];
+
+function VerdictBanner({ result }: { result: PredictResponse }) {
+
+  const verdict = result.prediction ?? "SUSPICIOUS";
+  const display = VERDICT_DISPLAY[verdict] ?? VERDICT_DISPLAY.SUSPICIOUS;
+  const level = result.verification_level;
+
+  const denomRaw = result.forensic_analysis?.denomination_classification?.value;
+  const denom = typeof denomRaw === "string" ? denomRaw : null;
+
+  const isUnverified = verdict === "UNVERIFIED";
+  const isLimited = !isUnverified && level === "partial";
+
+  return (
+    <div className={`rounded-2xl border ${display.border} ${display.bg} p-6`}>
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-gray-400 mb-1">
+            Result
+          </p>
+          <h2 className={`text-4xl font-bold ${display.accent}`}>
+            {display.headline}
+            {denom && !isUnverified && (
+              <span className="text-gray-200 text-2xl font-semibold ml-2">
+                ₹{denom}
+              </span>
+            )}
+          </h2>
+        </div>
+
+        {!isUnverified && (
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Confidence</p>
+            <p className={`text-2xl font-bold ${display.accent}`}>
+              {result.confidence}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <p className="text-sm text-gray-300 mt-3 leading-relaxed">
+        {display.sub}
+      </p>
+
+      {/* Limited-check caveat (note read only partially) */}
+      {isLimited && result.guidance && (
+        <div className="mt-4 rounded-xl bg-black/30 border border-yellow-500/30 p-3">
+          <p className="text-sm text-yellow-300">
+            ⚠ {result.guidance}
+          </p>
+        </div>
+      )}
+
+      {/* Retake guidance (couldn't read the note at all) */}
+      {isUnverified && (
+        <div className="mt-4 rounded-xl bg-black/30 border border-orange-500/30 p-4">
+          <p className="text-sm text-orange-200 font-semibold mb-2">
+            How to get a good photo:
+          </p>
+          <ul className="space-y-1.5">
+            {RETAKE_TIPS.map((tip, i) => (
+              <li key={i} className="text-sm text-gray-300 flex gap-2">
+                <span className="text-orange-400 mt-0.5">•</span>
+                <span>{tip}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// =====================================================
+// PLAIN FINDINGS (Phase K)
+// =====================================================
+// Re-expresses the technical checks as a few human categories with plain
+// English and a clear ✓ / ⚠ / — status, so a non-technical user can
+// "seriously understand" what was and wasn't checked. The raw numbers
+// still live in the Technical details expander below.
+
+type PlainCheck = {
+  key: keyof ForensicAnalysis;
+  group: string;
+  label: string;
+  good: string;
+  fail: string;
+  info: string;
+};
+
+const PLAIN_CHECKS: PlainCheck[] = [
+  { key: "ocr_serial_number", group: "Identity", label: "Serial number",
+    good: "Read the note's serial number.",
+    fail: "Couldn't read a serial number.",
+    info: "Serial number wasn't readable in this photo." },
+  { key: "denomination_classification", group: "Identity", label: "Denomination",
+    good: "Recognised the note's value.",
+    fail: "Couldn't recognise the value.",
+    info: "Value wasn't clearly readable." },
+  { key: "proportion_analysis", group: "Size & shape", label: "Size & shape",
+    good: "Dimensions match a real note of this value.",
+    fail: "Dimensions look wrong — possible stretch or wrong-size paper.",
+    info: "Couldn't measure the note's size in this photo." },
+  { key: "watermark_detection", group: "Security features", label: "Watermark",
+    good: "The watermark area looks right.",
+    fail: "The watermark area looks wrong.",
+    info: "Couldn't assess the watermark." },
+  { key: "security_thread_detection", group: "Security features", label: "Security thread",
+    good: "Found the vertical security thread.",
+    fail: "Couldn't find the security thread.",
+    info: "Security thread wasn't assessed." },
+  { key: "uv_light_detection", group: "Security features", label: "Special ink",
+    good: "Ink response looks consistent with a real note.",
+    fail: "Ink response looks off.",
+    info: "Proper check needs UV light — shown for information only." },
+  { key: "microprint_detection", group: "Security features", label: "Tiny print",
+    good: "Fine micro-print looks intact.",
+    fail: "Fine micro-print looks lost.",
+    info: "Photo isn't sharp enough to check the tiny print." },
+  { key: "structural_sanity", group: "Look & feel", label: "Overall look",
+    good: "Overall structure looks like a banknote.",
+    fail: "Doesn't look like a proper banknote.",
+    info: "Overall structure was unclear." },
+  { key: "hologram_detection", group: "Look & feel", label: "Colours",
+    good: "Colours look right for a real note.",
+    fail: "Colours look wrong — washed out or off.",
+    info: "Colours weren't assessed." },
+  { key: "gandhi_face_analysis", group: "Look & feel", label: "Portrait",
+    good: "Found the Gandhi portrait.",
+    fail: "The portrait looks wrong.",
+    info: "Couldn't auto-find the portrait (this detector is unreliable, so it's not counted)." },
+];
+
+const GROUP_ORDER = ["Identity", "Size & shape", "Security features", "Look & feel"];
+
+function statusToPlain(status?: "PASS" | "FAIL" | "INFO") {
+  if (status === "PASS")
+    return { icon: "✓", color: "text-green-400", state: "good" as const };
+  if (status === "FAIL")
+    return { icon: "✗", color: "text-red-400", state: "bad" as const };
+  return { icon: "—", color: "text-gray-500", state: "unknown" as const };
+}
+
+function PlainFindings({ result }: { result: PredictResponse }) {
+
+  const fa = result.forensic_analysis;
+  if (!fa) return null;
+
+  return (
+    <div className="mt-8 bg-zinc-900 border border-zinc-700 rounded-2xl p-5">
+
+      <h3 className="text-xl font-bold mb-1">What we checked</h3>
+      <p className="text-sm text-gray-500 mb-5">
+        Plain-language summary. ✓ looks right · ✗ a problem · — couldn&apos;t check.
+      </p>
+
+      <div className="space-y-5">
+        {GROUP_ORDER.map((group) => {
+          const items = PLAIN_CHECKS.filter((c) => c.group === group);
+          return (
+            <div key={group}>
+              <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                {group}
+              </p>
+              <div className="space-y-2">
+                {items.map((c) => {
+                  const check = fa[c.key];
+                  const st = statusToPlain(check?.status);
+                  const text =
+                    st.state === "good" ? c.good
+                      : st.state === "bad" ? c.fail
+                        : c.info;
+                  return (
+                    <div key={c.key} className="flex gap-3 items-start">
+                      <span className={`text-lg leading-6 ${st.color}`}>
+                        {st.icon}
+                      </span>
+                      <div>
+                        <span className="text-sm font-semibold text-gray-200">
+                          {c.label}
+                        </span>
+                        <span className="text-sm text-gray-400"> — {text}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
     </div>
   );

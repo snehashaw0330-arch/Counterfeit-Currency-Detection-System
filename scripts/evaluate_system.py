@@ -21,6 +21,9 @@ Interpretation (counterfeit-detector framing):
   fake note    -> FAKE        = correct (caught)
   fake note    -> SUSPICIOUS  = flagged for review (partial catch)
   fake note    -> REAL        = FALSE NEGATIVE (dangerous: passes a fake)
+  any note     -> UNVERIFIED  = couldn't read the image well enough to judge
+                                (Phase K honesty gate — neither cleared nor
+                                 caught; the photo needs retaking)
 """
 
 import argparse
@@ -32,7 +35,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 INDEX = os.path.join(ROOT, "dataset", "index.json")
-_VERDICTS = ("REAL", "SUSPICIOUS", "FAKE")
+_VERDICTS = ("REAL", "SUSPICIOUS", "FAKE", "UNVERIFIED")
 
 
 def main(split):
@@ -79,11 +82,11 @@ def main(split):
 
     # ---- report ----
     print("\n=== End-to-end verdict confusion (rows = ground truth) ===")
-    print(f"{'':10} | {'REAL':>10} {'SUSPICIOUS':>12} {'FAKE':>8}")
-    print("-" * 46)
+    print(f"{'':10} | {'REAL':>10} {'SUSPICIOUS':>12} {'FAKE':>8} {'UNVERIFIED':>12}")
+    print("-" * 60)
     for gt in ("genuine", "fake"):
         c = confusion[gt]
-        print(f"{gt:10} | {c['REAL']:>10} {c['SUSPICIOUS']:>12} {c['FAKE']:>8}")
+        print(f"{gt:10} | {c['REAL']:>10} {c['SUSPICIOUS']:>12} {c['FAKE']:>8} {c['UNVERIFIED']:>12}")
 
     n_gen = sum(confusion["genuine"].values())
     n_fake = sum(confusion["fake"].values())
@@ -97,11 +100,16 @@ def main(split):
     fake_caught = confusion["fake"]["FAKE"] + confusion["fake"]["SUSPICIOUS"]
     fake_passed = confusion["fake"]["REAL"]
 
+    gen_unverified = confusion["genuine"]["UNVERIFIED"]
+    fake_unverified = confusion["fake"]["UNVERIFIED"]
+
     print("\n=== headline (counterfeit-detector framing) ===")
     print(f"  genuine cleared as REAL      : {gen_cleared}/{n_gen}  ({pct(gen_cleared, n_gen)})")
     print(f"  genuine wrongly FAKE (FP)    : {gen_false_pos}/{n_gen}  ({pct(gen_false_pos, n_gen)})")
+    print(f"  genuine UNVERIFIED (retake)  : {gen_unverified}/{n_gen}  ({pct(gen_unverified, n_gen)})")
     print(f"  fake flagged (FAKE+SUSP)     : {fake_caught}/{n_fake}  ({pct(fake_caught, n_fake)})")
     print(f"  fake passed as REAL (FN)     : {fake_passed}/{n_fake}  ({pct(fake_passed, n_fake)})  <- most dangerous")
+    print(f"  fake UNVERIFIED (retake)     : {fake_unverified}/{n_fake}  ({pct(fake_unverified, n_fake)})")
 
     if errors:
         print(f"\n{len(errors)} error(s):")

@@ -61,9 +61,15 @@ def test_predict_returns_combined_verdict_shape(
     ):
         assert key in body, f"missing key {key} in response"
 
-    assert body["prediction"] in {"REAL", "FAKE", "SUSPICIOUS"}
+    assert body["prediction"] in {"REAL", "FAKE", "SUSPICIOUS", "UNVERIFIED"}
     assert body["model_verdict"] in {"REAL", "FAKE"}
     assert 0 <= body["forensic_score"] <= 100
+
+    # Phase K: the honesty/readability fields are always present.
+    assert body["verification_level"] in {"full", "partial", "none"}
+    assert "verification" in body
+    for key in ("serial_read", "proportions_measured", "note_located"):
+        assert key in body["verification"]
 
 
 def test_predict_handles_invalid_image(client):
@@ -145,5 +151,7 @@ def test_predict_blank_image_is_not_real(
     body = response.json()
 
     # A grey square should never be classified as a confident
-    # REAL note — forensic checks all fail on it.
-    assert body["prediction"] in {"FAKE", "SUSPICIOUS"}
+    # REAL note — forensic checks all fail on it. (FAKE, SUSPICIOUS,
+    # or the Phase-K "can't verify" outcome are all acceptable — just
+    # never REAL.)
+    assert body["prediction"] in {"FAKE", "SUSPICIOUS", "UNVERIFIED"}

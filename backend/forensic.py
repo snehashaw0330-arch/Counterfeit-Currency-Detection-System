@@ -316,6 +316,58 @@ def _detect_note_quad(image):
                 "avg_h": avg_h,
             }
 
+        # Fallback: no clean 4-gon (rounded corners, soft edges, a
+        # slightly rotated note, or one partly merged with a busy
+        # background). Take the largest in-range contour's minimum-
+        # area rotated rectangle. This recovers many real phone
+        # photos that the strict quad test rejected, while the
+        # banknote-aspect gate still keeps us from locking onto
+        # arbitrary background rectangles.
+        for contour in contours[:6]:
+            area = cv2.contourArea(contour)
+            if area < img_area * 0.15:
+                break
+            if area > img_area * 0.97:
+                continue
+
+            box = cv2.boxPoints(cv2.minAreaRect(contour))
+            quad = _order_quad(box)
+            tl, tr, br, bl = quad
+
+            avg_w = (
+                float(np.linalg.norm(tr - tl))
+                + float(np.linalg.norm(br - bl))
+            ) / 2.0
+            avg_h = (
+                float(np.linalg.norm(bl - tl))
+                + float(np.linalg.norm(br - tr))
+            ) / 2.0
+
+            long_edge = max(avg_w, avg_h)
+            short_edge = min(avg_w, avg_h)
+            if short_edge < 1:
+                continue
+
+            aspect = long_edge / short_edge
+            if (
+                aspect < _BANKNOTE_ASPECT_LO
+                or aspect > _BANKNOTE_ASPECT_HI
+            ):
+                continue
+
+            # Guard: the rotated rect must actually be filled by the
+            # contour (a real note fills its bounding box ~well; an
+            # L-shaped background blob does not).
+            if area < (avg_w * avg_h) * 0.70:
+                continue
+
+            return {
+                "quad": quad,
+                "aspect": aspect,
+                "avg_w": avg_w,
+                "avg_h": avg_h,
+            }
+
         return None
 
     except Exception:
@@ -761,6 +813,15 @@ def _easyocr_words(image):
 
     img = _ensure_bgr(image)
 
+    # Try harder on small inputs: EasyOCR's detector needs enough
+    # pixel height on the serial digits. A 300px-wide phone-photo
+    # crop leaves the serial ~10px tall — below the reliable
+    # threshold — so upscale to _TARGET_OCR_WIDTH first. (Was only
+    # done on the legacy Tesseract path; wiring it in here is what
+    # lets low-res uploads read at all.) Coordinates returned are
+    # only used for relative line-pairing, so the scale-up is safe.
+    img = _normalise_for_ocr(img)
+
     try:
         results = reader.readtext(
             img, allowlist=_ALNUM_SPACE, detail=1
@@ -1164,9 +1225,20 @@ def analyze_gandhi_face(image):
 
     if len(faces) == 0:
 
+        # INFO, not FAIL: the Haar frontal-face cascade is unreliable
+        # on the stylised, low-contrast Gandhi engraving — it misses
+        # the portrait on plenty of *genuine* notes (especially low-
+        # resolution photos). Absence of a detection is not evidence
+        # of a fake, so we must not FAIL a real note on it. (Same
+        # "don't false-fail genuine notes" rule we applied to micro-
+        # print and the rejected ORB motif check.)
         return {
-            "status": "FAIL",
-            "details": "No portrait detected on note"
+            "status": "INFO",
+            "details": (
+                "Portrait not auto-detected — the face detector is "
+                "unreliable on low-resolution or stylised portraits, "
+                "so this is not counted against the note"
+            )
         }
 
     return {
@@ -2826,3 +2898,103 @@ def run_forensic_pipeline(image):
     }
 
     return results
+
+
+# =====================================================
+# READABILITY / INPUT-QUALITY GATE
+# =====================================================
+# Honesty layer: decide whether we actually managed to READ the
+# note well enough to stand behind a verdict. A confident "REAL"
+# is meaningless if the serial couldn't be read and the note's
+# size couldn't be measured — that just means the photo was too
+# poor. This drives the "Can't verify — retake" outcome instead
+# of a misleading REAL.
+
+# Plain-English labels for the things a user can re-shoot for.
+_READABLE_LABELS = {
+    "serial": "the serial number",
+    "proportions": "the note's size and shape",
+    "denomination": "the denomination",
+}
+
+
+def assess_readability(image, results):
+    """How well could we actually read this note? Returns a dict:
+
+      level: "full"    — serial read AND proportions measured
+             "partial" — at least one identity signal read, but not all
+             "none"    — no identity signal could be read (unusable photo)
+      note_located, resolution_px, serial_read, proportions_measured,
+      denomination_read, unread (list of human labels), guidance (str).
+
+    Pure, deterministic, never raises."""
+
+    try:
+        img = _ensure_bgr(image)
+        located = _locate_note(img)
+        res_px = int(located.shape[1])
+        note_located = _detect_note_quad(img) is not None
+
+        serial_read = (
+            results.get("ocr_serial_number", {}).get("status") == "PASS"
+        )
+        proportions_measured = (
+            results.get("proportion_analysis", {}).get("value") is not None
+        )
+        denomination_read = bool(
+            results.get("denomination_classification", {}).get("value")
+        )
+
+        if serial_read and proportions_measured:
+            level = "full"
+        elif serial_read or proportions_measured or denomination_read:
+            level = "partial"
+        else:
+            level = "none"
+
+        unread = []
+        if not serial_read:
+            unread.append(_READABLE_LABELS["serial"])
+        if not proportions_measured:
+            unread.append(_READABLE_LABELS["proportions"])
+
+        if level == "none":
+            guidance = (
+                "Couldn't read this note. For a real check, retake the photo: "
+                "fill the frame with the note, use good even lighting with no "
+                "glare, keep the note flat, and make sure both serial numbers "
+                "are sharp and in focus."
+            )
+        elif level == "partial":
+            missing = " and ".join(unread) if unread else "some details"
+            guidance = (
+                f"Only a partial check was possible — couldn't read {missing}. "
+                f"Retake the photo closer and sharper (fill the frame, good "
+                f"light, note flat) for a full check."
+            )
+        else:
+            guidance = ""
+
+        return {
+            "level": level,
+            "note_located": note_located,
+            "resolution_px": res_px,
+            "serial_read": serial_read,
+            "proportions_measured": proportions_measured,
+            "denomination_read": denomination_read,
+            "unread": unread,
+            "guidance": guidance,
+        }
+
+    except Exception as exc:
+        # Never block a response on the quality gate; assume partial.
+        return {
+            "level": "partial",
+            "note_located": False,
+            "resolution_px": 0,
+            "serial_read": False,
+            "proportions_measured": False,
+            "denomination_read": False,
+            "unread": [],
+            "guidance": f"Quality check unavailable ({exc}).",
+        }

@@ -6,7 +6,44 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-02 (Phases I + J SHIPPED end-to-end; both committed)
+**Last updated:** 2026-06-03 (Phase K — trustworthy + understandable results)
+
+## ✅ Phase K — readability gate, verdict honesty, plain-language UI
+
+**Trigger:** user tested a genuine ₹100 web-thumbnail photo and got OCR "Not
+Detected", proportion "couldn't measure", Gandhi face FAIL — yet verdict REAL
+82%, plus a wall of technical INFO/jargon. Root-caused (verified): the note
+wasn't auto-located and/or was too low-res, so OCR/face/proportion collapsed,
+but the *other* checks still passed → misleading REAL. Plus the output was
+engineer-speak.
+
+**Fixes (all shipped):**
+- **K2 read harder:** `_easyocr_words` now upscales small crops to
+  `_TARGET_OCR_WIDTH` BEFORE EasyOCR (was only on the dead Tesseract path) —
+  this alone made the ₹100 serial read ("7MP 979885"). `_detect_note_quad`
+  gained a `minAreaRect` fallback (rounded/rotated/soft edges). Gandhi "no face"
+  downgraded **FAIL → INFO** (was false-failing genuine notes; same rule as
+  micro-print/ORB).
+- **K1+K3 honesty gate:** `forensic.assess_readability(image, results)` →
+  level full/partial/none from whether serial/proportions/denomination read.
+  `main._analyze` overlays it: a REAL/SUSPICIOUS that read NOTHING becomes
+  **`UNVERIFIED`** ("Can't verify — retake"); a clear FAKE (structural/colour)
+  stays FAKE. New response fields: `security_verdict`, `verification_level`,
+  `verification{...}`, `guidance`.
+- **K5 plain UI** (`frontend/app/page.tsx`): verdict **banner** (plain headline +
+  ₹denom + retake tips for UNVERIFIED + limited-check caveat for partial),
+  **"What we checked"** grouped plain findings (✓/✗/— + human text, 4 groups),
+  AI explanation promoted, and ALL raw cards moved into a **"Technical details"**
+  `<details>` expander. `tsc` + `next build` both clean.
+- **K6 tests:** `tests/test_phase_k_quality.py` (level logic, unread/guidance,
+  never-raises, blank→none, endpoint exposes verification). Updated `test_api.py`
+  for the UNVERIFIED enum + verification fields. `scripts/evaluate_system.py`
+  updated to count UNVERIFIED as a 4th outcome. **31 passed** (phase_k + api +
+  forensic).
+
+**Verified end-to-end on the user's ₹100:** REAL 93% / verification **full** /
+serial **7MP 979885** / proportions PASS / face PASS / guidance empty. All three
+reported defects fixed.
 
 ## ✅ Phases I + J — DONE, shipped end-to-end
 
@@ -204,6 +241,16 @@ Decision pending from user on whether to add an optional augmentation phase.
 
 ## Session log (most recent first)
 
+- **2026-06-03 (10)** — **Phase K: trustworthy + understandable results.** User
+  reported a genuine ₹100 photo reading as REAL while OCR/proportion/face all
+  silently failed, with jargon-heavy output. Root-caused to localization +
+  low-res OCR; fixed by (a) upscaling before EasyOCR + a minAreaRect localization
+  fallback + Gandhi FAIL→INFO, (b) an honest readability gate that yields a new
+  `UNVERIFIED` "can't verify — retake" verdict instead of a misleading REAL, and
+  (c) a plain-language UI redesign (verdict banner + grouped "what we checked"
+  findings + retake tips + technical-details expander). 31 tests green; frontend
+  `next build` clean; verified on the user's actual ₹100 (now REAL/full, serial
+  "7MP 979885"). Eval script updated for the 4th verdict.
 - **2026-06-02 (9)** — **Phases I + J shipped end-to-end.** Phase I: tested
   (`tests/test_phase_i_genai.py`, 13 green) and committed the GenAI explanation
   layer (`backend/genai.py` + `POST /explain`) and added the frontend
