@@ -337,10 +337,11 @@ async def explain_result(payload: dict = Body(...)):
     manual-verification guidance. Uses Claude when ANTHROPIC_API_KEY is set,
     otherwise a deterministic template. Never fails the request."""
     try:
+        lang = payload.get("lang", "en") if isinstance(payload, dict) else "en"
         return {
             "status": "success",
             "llm_available": llm_available(),
-            "explanation": genai_explain(payload),
+            "explanation": genai_explain(payload, lang),
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

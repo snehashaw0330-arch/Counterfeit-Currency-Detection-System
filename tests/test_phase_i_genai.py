@@ -114,6 +114,43 @@ def test_never_raises_on_garbage(bad):
     assert out["source"] == "template"
 
 
+def _has_devanagari(s):
+    return any("ऀ" <= ch <= "ॿ" for ch in s)
+
+
+def test_hindi_template_is_devanagari():
+    result = {
+        "prediction": "REAL",
+        "confidence": "90%",
+        "forensic_analysis": {
+            "denomination_classification": {"status": "PASS", "value": "100"},
+        },
+    }
+    out = genai.explain(result, "hi")
+    _assert_explanation_shape(out)
+    assert out["source"] == "template"
+    assert _has_devanagari(out["summary"])
+    assert _has_devanagari(out["manual_checks"][0])
+
+
+def test_hindi_fake_reasons_are_devanagari():
+    result = {
+        "prediction": "FAKE",
+        "forensic_analysis": {
+            "watermark_detection": {"status": "FAIL", "details": "no gradient"},
+        },
+    }
+    out = genai.explain(result, "hi")
+    assert _has_devanagari(" ".join(out["reasons"]))
+
+
+@pytest.mark.parametrize("bad", [None, "x", 123])
+def test_hindi_never_raises_on_garbage(bad):
+    out = genai.explain(bad, "hi")
+    _assert_explanation_shape(out)
+    assert _has_devanagari(out["summary"])
+
+
 def test_explain_endpoint_returns_explanation():
     """The /explain endpoint wraps explain() and never 500s."""
     from fastapi.testclient import TestClient

@@ -156,6 +156,61 @@ const VERDICT_DISPLAY: Record<
   },
 };
 
+type Lang = "en" | "hi";
+
+// Hindi headline + meaning per verdict (colours reused from VERDICT_DISPLAY).
+const VERDICT_HEADLINE_HI: Record<string, { headline: string; sub: string }> = {
+  REAL: {
+    headline: "संभवतः असली",
+    sub: "अधिकांश सुरक्षा जाँच पास हुईं। यह गारंटी नहीं है — ज़रूरी हो तो हाथ से जाँचें।",
+  },
+  FAKE: {
+    headline: "संभवतः नकली",
+    sub: "एक या अधिक महत्वपूर्ण जाँच विफल रहीं। सावधानी बरतें और हाथ से जाँचें।",
+  },
+  SUSPICIOUS: {
+    headline: "पुष्टि नहीं हो सकी",
+    sub: "कुछ जाँच अस्पष्ट रहीं। संदिग्ध मानें और स्वीकार करने से पहले हाथ से जाँचें।",
+  },
+  UNVERIFIED: {
+    headline: "इस फ़ोटो की पुष्टि नहीं",
+    sub: "नोट को पढ़ने के लिए फ़ोटो बहुत अस्पष्ट थी। कृपया दोबारा फ़ोटो लें।",
+  },
+};
+
+// Small UI-string dictionary for the bilingual labels.
+const UI: Record<string, { en: string; hi: string }> = {
+  result: { en: "Result", hi: "परिणाम" },
+  confidence: { en: "Confidence", hi: "विश्वास" },
+  listen: { en: "Listen", hi: "सुनें" },
+  stop: { en: "Stop", hi: "रोकें" },
+  explainTitle: { en: "Explain with AI", hi: "AI से समझें" },
+  explainCta: { en: "Explain this result", hi: "यह परिणाम समझाएँ" },
+  regenerate: { en: "Regenerate", hi: "फिर से बनाएँ" },
+  generating: { en: "Generating…", hi: "बना रहे हैं…" },
+  summary: { en: "Summary", hi: "सारांश" },
+  why: { en: "Why", hi: "कारण" },
+  byHand: { en: "Check it by hand", hi: "हाथ से जाँचें" },
+  retakeHow: { en: "How to get a good photo:", hi: "अच्छी फ़ोटो कैसे लें:" },
+};
+
+const t = (key: string, lang: Lang) => UI[key]?.[lang] ?? UI[key]?.en ?? key;
+
+// Browser text-to-speech (accessibility). No-op if unsupported.
+function speak(text: string, lang: Lang) {
+  if (typeof window === "undefined" || !window.speechSynthesis || !text) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang === "hi" ? "hi-IN" : "en-US";
+  u.rate = 0.98;
+  window.speechSynthesis.speak(u);
+}
+function stopSpeaking() {
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
 export default function Home() {
 
   // =====================================================
@@ -175,6 +230,8 @@ export default function Home() {
     useState<PredictResponse | null>(null);
 
   const [dragOver, setDragOver] = useState(false);
+
+  const [lang, setLang] = useState<Lang>("en");
 
   // =====================================================
   // HANDLE IMAGE CHANGE
@@ -305,6 +362,23 @@ export default function Home() {
           language, and is honest when it can&apos;t be sure. A screening aid —
           not a guarantee.
         </p>
+
+        {/* Language toggle (Phase M — accessibility/reach) */}
+        <div className="mt-6 inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1 text-sm">
+          {(["en", "hi"] as Lang[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => { setLang(l); stopSpeaking(); }}
+              className={`px-4 py-1.5 rounded-full font-medium transition-all ${
+                lang === l
+                  ? "bg-emerald-500 text-white shadow"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              {l === "en" ? "English" : "हिंदी"}
+            </button>
+          ))}
+        </div>
 
       </div>
 
@@ -452,7 +526,7 @@ export default function Home() {
             {/* VERDICT BANNER — plain-language hero (Phase K) */}
             {/* ================================================= */}
 
-            <VerdictBanner result={result} />
+            <VerdictBanner result={result} lang={lang} />
 
             {/* ================================================= */}
             {/* WHAT WE FOUND — grouped plain findings (Phase K) */}
@@ -464,7 +538,7 @@ export default function Home() {
             {/* EXPLAIN WITH AI (Phase I) — plain explanation */}
             {/* ================================================= */}
 
-            <ExplainPanel result={result} />
+            <ExplainPanel result={result} lang={lang} />
 
             {/* ================================================= */}
             {/* TECHNICAL DETAILS (collapsible) — for power users */}
@@ -1199,12 +1273,21 @@ function ModelComparisonPanel({ models }: { models?: MlModels }) {
 // always works locally. This is the project's "GenAI that does something good":
 // explainability, NOT counterfeit generation.
 
-function ExplainPanel({ result }: { result: PredictResponse }) {
+function ExplainPanel({ result, lang }: { result: PredictResponse; lang: Lang }) {
 
   const [loading, setLoading] = useState(false);
   const [explanation, setExplanation] = useState<Explanation | null>(null);
   const [source, setSource] = useState<"llm" | "template" | null>(null);
   const [error, setError] = useState<string>("");
+  const [speaking, setSpeaking] = useState(false);
+
+  // If the language changes, the existing explanation is stale — clear it.
+  useEffect(() => {
+    setExplanation(null);
+    setSource(null);
+    stopSpeaking();
+    setSpeaking(false);
+  }, [lang]);
 
   const handleExplain = async () => {
     try {
@@ -1213,7 +1296,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
 
       const response = await axios.post<ExplainResponse>(
         "http://127.0.0.1:8000/explain",
-        result,
+        { ...result, lang },
         { headers: { "Content-Type": "application/json" } }
       );
 
@@ -1230,20 +1313,32 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
     }
   };
 
+  const toListen = () => {
+    if (!explanation) return;
+    if (speaking) { stopSpeaking(); setSpeaking(false); return; }
+    const text = [
+      explanation.summary,
+      ...explanation.reasons,
+      ...explanation.manual_checks,
+    ].join(". ");
+    speak(text, lang);
+    setSpeaking(true);
+  };
+
   return (
     <div className="mt-8 bg-white/[0.04] p-5 rounded-2xl border border-white/10">
 
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-bold">Explain with AI</h3>
+        <h3 className="text-xl font-bold">{t("explainTitle", lang)}</h3>
         {source && (
           <span
             className={`text-xs font-bold px-3 py-1 rounded-full border ${
               source === "llm"
                 ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
-                : "bg-zinc-700/40 text-gray-300 border-white/15"
+                : "bg-white/[0.07] text-gray-300 border-white/15"
             }`}
           >
-            {source === "llm" ? "AI GENERATED" : "RULE-BASED SUMMARY"}
+            {source === "llm" ? "AI GENERATED" : "RULE-BASED"}
           </span>
         )}
       </div>
@@ -1255,28 +1350,40 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
         </p>
       )}
 
-      <button
-        onClick={handleExplain}
-        disabled={loading}
-        className="
-        bg-indigo-600
-        hover:bg-indigo-500
-        disabled:opacity-60
-        transition-all
-        duration-300
-        px-5
-        py-2.5
-        rounded-xl
-        text-sm
-        font-semibold
-        "
-      >
-        {loading
-          ? "Generating explanation..."
-          : explanation
-            ? "Regenerate explanation"
-            : "Explain this result"}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={handleExplain}
+          disabled={loading}
+          className="
+          bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60
+          transition-all duration-300
+          px-5 py-2.5 rounded-xl text-sm font-semibold
+          "
+        >
+          {loading
+            ? t("generating", lang)
+            : explanation
+              ? t("regenerate", lang)
+              : t("explainCta", lang)}
+        </button>
+
+        {explanation && (
+          <button
+            onClick={toListen}
+            className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-gray-200 hover:bg-white/10 transition-colors"
+          >
+            {speaking ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+              </svg>
+            )}
+            {speaking ? t("stop", lang) : t("listen", lang)}
+          </button>
+        )}
+      </div>
 
       {error && (
         <p className="text-sm text-red-400 mt-3">{error}</p>
@@ -1288,7 +1395,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
           {/* ---- Summary ---- */}
           <div>
             <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">
-              Summary
+              {t("summary", lang)}
             </p>
             <p className="text-base text-gray-200 leading-relaxed">
               {explanation.summary}
@@ -1299,7 +1406,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
           {explanation.reasons.length > 0 && (
             <div>
               <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider">
-                Why
+                {t("why", lang)}
               </p>
               <ul className="space-y-1.5">
                 {explanation.reasons.map((r, i) => (
@@ -1319,7 +1426,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
           {explanation.manual_checks.length > 0 && (
             <div>
               <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider">
-                Check it by hand
+                {t("byHand", lang)}
               </p>
               <ul className="space-y-1.5">
                 {explanation.manual_checks.map((m, i) => (
@@ -1480,11 +1587,16 @@ const RETAKE_TIPS = [
   "Make sure both serial numbers are sharp and in focus.",
 ];
 
-function VerdictBanner({ result }: { result: PredictResponse }) {
+function VerdictBanner({ result, lang }: { result: PredictResponse; lang: Lang }) {
 
   const verdict = result.prediction ?? "SUSPICIOUS";
   const display = VERDICT_DISPLAY[verdict] ?? VERDICT_DISPLAY.SUSPICIOUS;
   const level = result.verification_level;
+
+  // Hindi headline/sub when selected (colours come from the English map).
+  const hi = VERDICT_HEADLINE_HI[verdict];
+  const headline = lang === "hi" && hi ? hi.headline : display.headline;
+  const sub = lang === "hi" && hi ? hi.sub : display.sub;
 
   const denomRaw = result.forensic_analysis?.denomination_classification?.value;
   const denom = typeof denomRaw === "string" ? denomRaw : null;
@@ -1492,16 +1604,26 @@ function VerdictBanner({ result }: { result: PredictResponse }) {
   const isUnverified = verdict === "UNVERIFIED";
   const isLimited = !isUnverified && level === "partial";
 
+  const [speaking, setSpeaking] = useState(false);
+
+  const toListen = () => {
+    if (speaking) { stopSpeaking(); setSpeaking(false); return; }
+    const parts = [headline + (denom && !isUnverified ? ` ₹${denom}` : ""), sub];
+    if (result.guidance) parts.push(result.guidance);
+    speak(parts.join(". "), lang);
+    setSpeaking(true);
+  };
+
   return (
     <div className={`rounded-2xl border ${display.border} ${display.bg} p-6`}>
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-wider text-gray-400 mb-1">
-            Result
+            {t("result", lang)}
           </p>
           <h2 className={`text-4xl font-bold ${display.accent}`}>
-            {display.headline}
+            {headline}
             {denom && !isUnverified && (
               <span className="text-gray-200 text-2xl font-semibold ml-2">
                 ₹{denom}
@@ -1510,18 +1632,35 @@ function VerdictBanner({ result }: { result: PredictResponse }) {
           </h2>
         </div>
 
-        {!isUnverified && (
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Confidence</p>
-            <p className={`text-2xl font-bold ${display.accent}`}>
-              {result.confidence}
-            </p>
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {!isUnverified && (
+            <div className="text-right">
+              <p className="text-xs text-gray-400">{t("confidence", lang)}</p>
+              <p className={`text-2xl font-bold ${display.accent}`}>
+                {result.confidence}
+              </p>
+            </div>
+          )}
+          <button
+            onClick={toListen}
+            aria-label={speaking ? t("stop", lang) : t("listen", lang)}
+            className="flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-sm text-gray-200 hover:bg-white/10 transition-colors"
+          >
+            {speaking ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+              </svg>
+            )}
+            {speaking ? t("stop", lang) : t("listen", lang)}
+          </button>
+        </div>
       </div>
 
       <p className="text-sm text-gray-300 mt-3 leading-relaxed">
-        {display.sub}
+        {sub}
       </p>
 
       {/* Limited-check caveat (note read only partially) */}
@@ -1537,7 +1676,7 @@ function VerdictBanner({ result }: { result: PredictResponse }) {
       {isUnverified && (
         <div className="mt-4 rounded-xl bg-black/30 border border-orange-500/30 p-4">
           <p className="text-sm text-orange-200 font-semibold mb-2">
-            How to get a good photo:
+            {t("retakeHow", lang)}
           </p>
           <ul className="space-y-1.5">
             {RETAKE_TIPS.map((tip, i) => (
