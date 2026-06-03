@@ -305,6 +305,8 @@ export default function Home() {
 
   const [lang, setLang] = useState<Lang>("en");
 
+  const [cameraOpen, setCameraOpen] = useState(false);
+
   // =====================================================
   // HANDLE IMAGE CHANGE
   // =====================================================
@@ -522,6 +524,20 @@ export default function Home() {
             </p>
           </div>
         </label>
+
+        {/* Use-camera option (Phase O) */}
+        <div className="mt-3 flex justify-center">
+          <button
+            onClick={() => setCameraOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            Use camera
+          </button>
+        </div>
 
         {/* IMAGE PREVIEW (with detected-note overlay — Phase G.3) */}
 
@@ -1027,6 +1043,17 @@ export default function Home() {
       {/* ================================================= */}
 
       <SecurityPatternStudio />
+
+      {/* ================================================= */}
+      {/* LIVE CAMERA CAPTURE (Phase O) */}
+      {/* ================================================= */}
+
+      {cameraOpen && (
+        <CameraModal
+          onClose={() => setCameraOpen(false)}
+          onCapture={(file) => { acceptFile(file); setCameraOpen(false); }}
+        />
+      )}
 
       {/* ================================================= */}
       {/* HELP CHATBOT (Phase L) — floating assistant */}
@@ -2127,5 +2154,139 @@ function ChatAssistant() {
         </div>
       )}
     </>
+  );
+}
+// =====================================================
+// LIVE CAMERA CAPTURE MODAL (Phase O)
+// =====================================================
+// Opens the device camera (rear-facing on mobile), shows a live preview, and
+// captures a still frame as a JPEG File fed into the same /predict flow.
+// Pure browser APIs (getUserMedia + canvas) — no new dependencies. Cleans up
+// the media stream on close/unmount.
+
+function CameraModal({
+  onClose,
+  onCapture,
+}: {
+  onClose: () => void;
+  onCapture: (file: File) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [error, setError] = useState<string>("");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setError("This browser doesn't expose a camera API.");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setReady(true);
+      } catch {
+        setError("Couldn't access the camera. Check the browser permission.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const capture = () => {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) return;
+        onCapture(new File([blob], "camera-capture.jpg", { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.92
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="card w-full max-w-2xl p-5 animate-in">
+
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold">Capture a note</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close camera"
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-white/10 hover:text-white"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        {error ? (
+          <p className="text-sm text-red-400 py-10 text-center">{error}</p>
+        ) : (
+          <>
+            <div className="relative overflow-hidden rounded-2xl bg-black ring-1 ring-white/10">
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video ref={videoRef} playsInline muted className="w-full h-auto block" />
+              {!ready && (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
+                  Starting camera…
+                </div>
+              )}
+              {/* framing guide */}
+              <div className="pointer-events-none absolute inset-6 rounded-xl border-2 border-dashed border-emerald-400/50" />
+            </div>
+
+            <p className="text-xs text-gray-500 mt-3 text-center">
+              Fill the frame with the note, hold steady in good light, then capture.
+            </p>
+
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-xl border border-white/15 bg-white/5 py-3 text-sm font-semibold text-gray-200 hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={capture}
+                disabled={!ready}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40 transition-all"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+                Capture
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
