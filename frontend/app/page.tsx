@@ -30,6 +30,7 @@ type ForensicAnalysis = {
   proportion_analysis: ForensicCheck;
   bleed_line_detection: ForensicCheck;
   identification_mark: ForensicCheck;
+  tamper_detection: ForensicCheck;
   modular_ai_pipeline: ForensicCheck;
 };
 
@@ -1027,6 +1028,11 @@ export default function Home() {
                 />
 
                 <FeatureCard
+                  title="Digital Tamper (ELA)"
+                  check={result?.forensic_analysis?.tamper_detection}
+                />
+
+                <FeatureCard
                   title="Modular AI Pipeline"
                   check={result?.forensic_analysis?.modular_ai_pipeline}
                 />
@@ -1884,6 +1890,10 @@ const PLAIN_CHECKS: PlainCheck[] = [
     good: "A raised identification mark is present where it should be.",
     fail: "The identification mark looks wrong.",
     info: "Couldn't confirm the raised identification mark — it's a touch feature." },
+  { key: "tamper_detection", group: "Look & feel", label: "Digital editing",
+    good: "No obvious digital editing of the image.",
+    fail: "Signs of digital editing in the image.",
+    info: "Image-tamper (ELA) reading — see details; informational only." },
   { key: "structural_sanity", group: "Look & feel", label: "Overall look",
     good: "Overall structure looks like a banknote.",
     fail: "Doesn't look like a proper banknote.",

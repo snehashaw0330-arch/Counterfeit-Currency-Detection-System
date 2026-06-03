@@ -3027,6 +3027,82 @@ def analyze_identification_mark(image, denomination=None):
 
 
 # =====================================================
+# DIGITAL TAMPER / ERROR-LEVEL ANALYSIS (Phase P.1)
+# =====================================================
+# ELA re-saves the image as JPEG and measures where the re-compression error is
+# concentrated. A camera photo of a real note recompresses fairly uniformly; a
+# spliced/edited or pasted region often re-compresses to a noticeably different
+# error level. This catches DIGITAL forgery of the *image*, which is distinct
+# from a physical counterfeit.
+#
+# Honest framing: ELA is a heuristic and genuine photos vary, so this is an
+# INFO-only signal (it never drives the REAL/FAKE verdict) — it reports a
+# uniform-vs-uneven assessment with the numbers, for a human to inspect.
+
+def analyze_tamper_ela(image):
+    """Error-Level Analysis for digital-editing hints. INFO only; never raises."""
+    try:
+        img = _ensure_bgr(image)
+        h, w = img.shape[:2]
+        if h < 64 or w < 64:
+            return {"status": "INFO",
+                    "details": "Image too small for tamper analysis",
+                    "value": None}
+
+        ok, enc = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if not ok:
+            return {"status": "INFO",
+                    "details": "Tamper analysis unavailable", "value": None}
+        recompressed = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+        if recompressed is None or recompressed.shape != img.shape:
+            return {"status": "INFO",
+                    "details": "Tamper analysis unavailable", "value": None}
+
+        ela = cv2.absdiff(img, recompressed).max(axis=2).astype(np.float32)
+        mx = float(ela.max())
+        mean = float(ela.mean())
+
+        if mx < 1.0:
+            return {
+                "status": "INFO",
+                "details": ("No JPEG error signal — likely a screenshot or "
+                            "graphic rather than a camera photo; ELA not "
+                            "informative here"),
+                "value": {"ela_mean": round(mean, 2), "ela_max": round(mx, 2)},
+            }
+
+        norm = ela / mx
+        high_error_fraction = float((norm > 0.6).mean())
+        value = {
+            "ela_mean": round(mean, 2),
+            "ela_max": round(mx, 2),
+            "high_error_fraction": round(high_error_fraction, 4),
+        }
+
+        # A small, concentrated pocket of very-high error against an otherwise
+        # low-error image is the classic splice/paste signature.
+        if 0.0008 < high_error_fraction < 0.05 and mean < 0.18 * mx:
+            return {
+                "status": "INFO",
+                "details": (
+                    f"Uneven error level (hot spots in "
+                    f"{high_error_fraction * 100:.1f}% of pixels) — the image "
+                    f"may have been digitally edited; inspect those regions"
+                ),
+                "value": value,
+            }
+        return {
+            "status": "INFO",
+            "details": ("Error level looks uniform — no obvious digital "
+                        "editing/splicing detected"),
+            "value": value,
+        }
+    except Exception as exc:
+        return {"status": "INFO",
+                "details": f"Tamper analysis unavailable: {exc}", "value": None}
+
+
+# =====================================================
 # PIPELINE ORCHESTRATOR
 # =====================================================
 
@@ -3114,6 +3190,15 @@ def run_forensic_pipeline(image):
         )
     except Exception as exc:
         results["identification_mark"] = {
+            "status": "INFO", "details": f"Error: {exc}", "value": None,
+        }
+
+    # Digital-tamper / ELA runs on the ORIGINAL image — the auto-crop warp
+    # re-interpolates pixels and would erase the JPEG error signal.
+    try:
+        results["tamper_detection"] = analyze_tamper_ela(original)
+    except Exception as exc:
+        results["tamper_detection"] = {
             "status": "INFO", "details": f"Error: {exc}", "value": None,
         }
 

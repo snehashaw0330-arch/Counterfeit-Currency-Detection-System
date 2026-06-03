@@ -25,6 +25,7 @@ EXPECTED_KEYS = {
     "proportion_analysis",
     "bleed_line_detection",
     "identification_mark",
+    "tamper_detection",
     "modular_ai_pipeline",
 }
 
