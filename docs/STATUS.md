@@ -6,7 +6,7 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-03 (Phases L, E, G.3 done; full-roadmap build in progress)
+**Last updated:** 2026-06-03 (Phases L, E, G.3, UI makeover, F.2 done; wrapping up)
 
 ## 🚧 Full-roadmap build (user mandate: "complete everything, no loose ends, demo-perfect")
 
@@ -29,10 +29,22 @@ Working in order, one solid commit per phase:
   normalised [0,1] note polygon in ORIGINAL coords; `/predict` returns `regions`;
   frontend draws a green SVG overlay + "Detected note" tag on the upload.
   `tests/test_phase_g_regions.py` (4).
-- **Next:** Phase F.2 ROC/PR threshold calibration (documented, data-bound),
-  then demo polish (sample gallery, README/REPORT refresh) + final full-suite
-  green + re-run end-to-end eval (confirm no regression from the new checks /
-  Gandhi FAIL→INFO).
+- **UI makeover — DONE (bf28627).** Full visual redesign: glass design system
+  (globals.css ambient glows + Geist + .card), gradient hero, drag-and-drop
+  dropzone, gradient Detect button w/ spinner, translucent panels, SVG chat FAB
+  + polished chat panel. tsc + next build clean. (User: previous UI "looked like
+  a kid's UI" — this replaces it.)
+- **Phase F.2 (threshold calibration) — DONE.** `scripts/calibrate_thresholds.py`
+  runs /predict over the corpus, prints the verdict confusion matrix, computes
+  ROC-AUC + Youden's-J optimal boundary, writes `docs/CALIBRATION.md`. Finding:
+  hand-set 0.65/0.35 cutoffs are consistent with the evidence (no change; 65-img
+  ROC too coarse to retune). Encoding fix: `sys.stdout.reconfigure(utf-8)` for
+  the → / ₹ glyphs on Windows.
+- **No-regression re-measure (post Phase E–L):** genuine 31 REAL / 11 SUSP / 0
+  FAKE / 0 UNVER (**0% false positives held**, clearing 71%→74%); fake 10 REAL /
+  7 SUSP / 5 FAKE / 1 UNVER (fakes-as-REAL 9→10, the accepted Gandhi-INFO trade).
+- **Remaining:** final full pytest suite green, commit polish (README, REPORT,
+  calibrate, CALIBRATION.md, STATUS), offer push.
 
 
 

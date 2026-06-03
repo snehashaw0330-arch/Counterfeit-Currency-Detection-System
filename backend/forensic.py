@@ -793,28 +793,39 @@ def _cross_variant_serials(per_crop_results):
     return out
 
 
-_TARGET_OCR_WIDTH = 1800
+# EasyOCR/Tesseract cost scales with pixel area, so we keep OCR inputs inside a
+# working band [_OCR_MIN_WIDTH, _OCR_MAX_WIDTH]:
+#   - tiny phone-thumbnails (≈300px) are UPSCALED to the min so the serial
+#     digits have enough height to recognise (this is the Phase-K fix);
+#   - very large scans/photos are DOWNSCALED to the max so a single request
+#     doesn't spend 15–20s in EasyOCR on CPU;
+#   - mid-size notes are left untouched (downscaling them too far drops the
+#     serial — measured: a 1450px note serial fails if squeezed to 1100).
+# Upscaling small inputs to 1100 (vs the old 1800) reads the serial just as
+# reliably at ≈3.7s instead of ≈9s per pass.
+_OCR_MIN_WIDTH = 1100
+_OCR_MAX_WIDTH = 1800
+_TARGET_OCR_WIDTH = _OCR_MIN_WIDTH  # back-compat alias
 
 
 def _normalise_for_ocr(image):
-    """Resize the image so its width is at least _TARGET_OCR_WIDTH.
-
-    Tiny inputs (148x341 phone-camera thumbnails) need this — at
-    native resolution Tesseract can't reliably resolve the serial
-    even after the per-variant upscale, because the crop is
-    pixel-starved before any preprocessing."""
+    """Clamp the image width into the OCR working band (upscale tiny inputs,
+    downscale only very large ones, leave mid-size notes as-is)."""
 
     h, w = image.shape[:2]
-
-    if w >= _TARGET_OCR_WIDTH:
+    if w < 1:
         return image
 
-    scale = _TARGET_OCR_WIDTH / w
-    return cv2.resize(
-        image, None,
-        fx=scale, fy=scale,
-        interpolation=cv2.INTER_CUBIC,
-    )
+    if w < _OCR_MIN_WIDTH:
+        scale = _OCR_MIN_WIDTH / float(w)
+        interp = cv2.INTER_CUBIC
+    elif w > _OCR_MAX_WIDTH:
+        scale = _OCR_MAX_WIDTH / float(w)
+        interp = cv2.INTER_AREA
+    else:
+        return image
+
+    return cv2.resize(image, None, fx=scale, fy=scale, interpolation=interp)
 
 
 def _easyocr_words(image):
@@ -2363,7 +2374,9 @@ def classify_denomination(image):
     if reader is None:
         return _classify_denomination_tesseract(image)
 
-    img = _ensure_bgr(image)
+    # Bound OCR cost — the denomination numeral is large, so a width-normalised
+    # image reads it just as well at a fraction of the time on big uploads.
+    img = _normalise_for_ocr(_ensure_bgr(image))
 
     try:
         results = reader.readtext(

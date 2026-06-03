@@ -28,3 +28,7 @@ models/classical/*.joblib
 
 # Phase F experimental CNN (not adopted; regenerable via scripts/train_cnn.py)
 models/*_v2.keras
+
+# Scratch eval/calibration console dumps (regenerable via the scripts)
+eval_out.txt
+calib_out.txt
