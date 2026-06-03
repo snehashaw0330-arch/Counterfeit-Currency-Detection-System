@@ -174,26 +174,29 @@ export default function Home() {
   const [result, setResult] =
     useState<PredictResponse | null>(null);
 
+  const [dragOver, setDragOver] = useState(false);
+
   // =====================================================
   // HANDLE IMAGE CHANGE
   // =====================================================
 
+  const acceptFile = (file?: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setSelectedImage(file);
+    setPreview(URL.createObjectURL(file));
+    setResult(null);
+  };
+
   const handleImageChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
+    acceptFile(e.target.files?.[0]);
+  };
 
-    const file = e.target.files?.[0];
-
-    if (file) {
-
-      setSelectedImage(file);
-
-      setPreview(
-        URL.createObjectURL(file)
-      );
-
-      setResult(null);
-    }
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    acceptFile(e.dataTransfer.files?.[0]);
   };
 
   // =====================================================
@@ -273,102 +276,97 @@ export default function Home() {
 
   return (
 
-    <main className="
-    min-h-screen
-    bg-black
-    text-white
-    flex
-    flex-col
-    items-center
-    px-6
-    py-10
-    ">
+    <main className="min-h-screen text-white flex flex-col items-center px-5 sm:px-6 py-14">
 
       {/* ================================================= */}
-      {/* TITLE */}
+      {/* HERO */}
       {/* ================================================= */}
 
-      <h1 className="
-      text-5xl
-      font-bold
-      text-center
-      mb-4
-      ">
+      <div className="w-full max-w-4xl text-center mb-10">
 
-        AI Counterfeit Currency Detection
+        <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs font-medium text-emerald-300/90 mb-6 backdrop-blur">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          Indian Rupee · Forensic + AI
+        </span>
 
-      </h1>
+        <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05]">
+          <span className="bg-gradient-to-br from-white via-white to-emerald-200/80 bg-clip-text text-transparent">
+            Counterfeit Currency
+          </span>
+          <br />
+          <span className="bg-gradient-to-br from-emerald-300 via-emerald-400 to-teal-400 bg-clip-text text-transparent">
+            Detection
+          </span>
+        </h1>
 
-      <p className="
-      text-gray-400
-      text-center
-      mb-10
-      max-w-3xl
-      ">
+        <p className="text-gray-400 mt-5 max-w-2xl mx-auto leading-relaxed">
+          Upload a photo of an Indian banknote. The system fuses a deep-learning
+          classifier with a forensic check pipeline, shows what it found in plain
+          language, and is honest when it can&apos;t be sure. A screening aid —
+          not a guarantee.
+        </p>
 
-        Deep Learning based forensic currency
-        authentication system using
-        MobileNetV2 and modular AI pipeline
-        architecture.
-
-      </p>
+      </div>
 
       {/* ================================================= */}
       {/* MAIN CARD */}
       {/* ================================================= */}
 
-      <div className="
-      bg-zinc-900
-      border
-      border-zinc-800
-      rounded-3xl
-      shadow-2xl
-      p-8
-      w-full
-      max-w-4xl
-      ">
+      <div className="card card-hover w-full max-w-4xl p-6 sm:p-8 animate-in">
 
-        {/* FILE INPUT */}
+        {/* DROPZONE */}
 
         <input
+          id="note-file"
           type="file"
           accept="image/*"
           onChange={handleImageChange}
-          className="
-          mb-6
-          block
-          w-full
-          text-sm
-          text-gray-300
-          file:mr-4
-          file:py-3
-          file:px-6
-          file:rounded-xl
-          file:border-0
-          file:text-sm
-          file:font-semibold
-          file:bg-green-500
-          file:text-white
-          hover:file:bg-green-600
-          "
+          className="hidden"
         />
+        <label
+          htmlFor="note-file"
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          className={`
+          group flex flex-col items-center justify-center gap-3 cursor-pointer
+          rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all
+          ${dragOver
+            ? "border-emerald-400/70 bg-emerald-500/10"
+            : "border-white/15 bg-white/[0.02] hover:border-emerald-400/40 hover:bg-white/[0.04]"}
+          `}
+        >
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30 transition-transform group-hover:scale-105">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </span>
+          <div>
+            <p className="font-semibold text-gray-100">
+              {selectedImage ? selectedImage.name : "Drop a banknote photo here"}
+            </p>
+            <p className="text-sm text-gray-500 mt-1">
+              or <span className="text-emerald-300 font-medium">browse</span>
+              {" · JPG / PNG · fill the frame for best results"}
+            </p>
+          </div>
+        </label>
 
         {/* IMAGE PREVIEW (with detected-note overlay — Phase G.3) */}
 
         {preview && (
 
-          <div className="mb-8 relative w-full">
+          <div className="mt-6 relative w-full overflow-hidden rounded-2xl ring-1 ring-white/10">
 
             <img
               src={preview}
               alt="Preview"
               className="
-              rounded-2xl
               w-full
               h-auto
               block
-              border
-              border-zinc-700
               bg-black
               "
             />
@@ -396,7 +394,8 @@ export default function Home() {
             )}
 
             {result?.regions && result.regions.length > 0 && (
-              <span className="absolute top-2 left-2 text-xs font-semibold bg-green-500/90 text-black px-2 py-0.5 rounded-md">
+              <span className="absolute top-3 left-3 inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-400 text-black px-2.5 py-1 rounded-lg shadow-lg">
+                <span className="h-1.5 w-1.5 rounded-full bg-black/70" />
                 Detected note
               </span>
             )}
@@ -404,30 +403,41 @@ export default function Home() {
           </div>
         )}
 
-        {/* BUTTON */}
+        {/* DETECT BUTTON */}
 
         <button
           onClick={handlePrediction}
-          disabled={loading}
+          disabled={loading || !selectedImage}
           className="
-          w-full
-          bg-green-500
-          hover:bg-green-600
-          transition-all
-          duration-300
-          py-4
-          rounded-2xl
-          text-lg
-          font-semibold
+          group mt-6 w-full
+          inline-flex items-center justify-center gap-2.5
+          rounded-2xl py-4 px-6
+          text-base font-semibold text-white
+          bg-gradient-to-br from-emerald-500 to-teal-600
+          shadow-[0_8px_30px_-8px_rgba(16,185,129,0.7)]
+          hover:from-emerald-400 hover:to-teal-500
+          hover:shadow-[0_10px_36px_-6px_rgba(16,185,129,0.8)]
+          disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none
+          transition-all duration-300
           "
         >
-
-          {
-            loading
-              ? "Detecting Currency..."
-              : "Detect Currency"
-          }
-
+          {loading ? (
+            <>
+              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" />
+              </svg>
+              Analysing the note…
+            </>
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              Detect Currency
+            </>
+          )}
         </button>
 
         {/* ================================================= */}
@@ -436,14 +446,7 @@ export default function Home() {
 
         {result && (
 
-          <div className="
-          mt-10
-          bg-black
-          border
-          border-zinc-800
-          rounded-2xl
-          p-6
-          ">
+          <div className="mt-8 animate-in">
 
             {/* ================================================= */}
             {/* VERDICT BANNER — plain-language hero (Phase K) */}
@@ -467,21 +470,19 @@ export default function Home() {
             {/* TECHNICAL DETAILS (collapsible) — for power users */}
             {/* ================================================= */}
 
-            <details className="mt-8">
+            <details className="mt-8 group">
               <summary className="
-              cursor-pointer
-              select-none
-              text-sm
-              font-semibold
-              text-gray-300
-              bg-zinc-900
-              border
-              border-zinc-700
-              rounded-xl
-              px-4
-              py-3
-              hover:bg-zinc-800
+              flex items-center gap-2
+              cursor-pointer select-none
+              text-sm font-semibold text-gray-300
+              rounded-xl border border-white/10 bg-white/[0.03]
+              px-4 py-3
+              hover:bg-white/[0.06] hover:text-white
+              transition-colors
               ">
+                <svg className="h-4 w-4 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
                 Technical details — forensic checks, ML models, raw numbers
               </summary>
 
@@ -496,11 +497,11 @@ export default function Home() {
             ">
 
               <div className="
-              bg-zinc-900
+              bg-white/[0.04]
               p-4
               rounded-2xl
               border
-              border-zinc-700
+              border-white/10
               ">
 
                 <h4 className="text-gray-400 text-sm mb-1">
@@ -529,11 +530,11 @@ export default function Home() {
               </div>
 
               <div className="
-              bg-zinc-900
+              bg-white/[0.04]
               p-4
               rounded-2xl
               border
-              border-zinc-700
+              border-white/10
               ">
 
                 <h4 className="text-gray-400 text-sm mb-1">
@@ -560,11 +561,11 @@ export default function Home() {
 
             <div className="
             mt-8
-            bg-zinc-900
+            bg-white/[0.04]
             p-5
             rounded-2xl
             border
-            border-zinc-700
+            border-white/10
             ">
 
               <h3 className="
@@ -690,7 +691,7 @@ export default function Home() {
                         : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
 
                   return (
-                    <div className="border border-zinc-800 rounded-2xl p-5 bg-zinc-900 space-y-5">
+                    <div className="border border-white/10 rounded-2xl p-5 bg-white/[0.04] space-y-5">
 
                       {/* ---- Header + status badge ---- */}
                       <div className="flex items-center justify-between">
@@ -716,7 +717,7 @@ export default function Home() {
                           <div className="flex items-center gap-1 flex-wrap">
                             {sizes.map((s, i) => (
                               <span key={i} className="flex items-center gap-1">
-                                <span className="px-3 py-1.5 rounded-lg bg-zinc-800 text-white font-mono text-sm font-semibold">
+                                <span className="px-3 py-1.5 rounded-lg bg-white/[0.07] text-white font-mono text-sm font-semibold">
                                   {s}px
                                 </span>
                                 {i < sizes.length - 1 && (
@@ -755,7 +756,7 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-3">
 
                         {v?.total_growth != null && (
-                          <div className="bg-zinc-800 rounded-xl p-3 text-center">
+                          <div className="bg-white/[0.07] rounded-xl p-3 text-center">
                             <p className="text-xs text-zinc-500 mb-1">Total Growth</p>
                             <p className="text-2xl font-bold text-cyan-400">
                               {v.total_growth}
@@ -764,7 +765,7 @@ export default function Home() {
                         )}
 
                         {rbiMatch !== undefined && (
-                          <div className="bg-zinc-800 rounded-xl p-3 text-center">
+                          <div className="bg-white/[0.07] rounded-xl p-3 text-center">
                             <p className="text-xs text-zinc-500 mb-1">RBI Pattern</p>
                             <span className={`inline-block px-4 py-1 rounded-full text-sm font-bold ${
                               rbiMatch
@@ -890,7 +891,7 @@ function FeatureCard({
 
     <div
       className={`
-      bg-zinc-900
+      bg-white/[0.04]
       p-4
       rounded-xl
       border
@@ -975,7 +976,7 @@ function ProportionPanel({ check }: { check?: ForensicCheck }) {
 
     <div className={`
     mt-8
-    bg-zinc-900
+    bg-white/[0.04]
     p-5
     rounded-2xl
     border
@@ -1102,7 +1103,7 @@ function ModelVerdictTile({
   subtitle: string;
 }) {
   return (
-    <div className="bg-zinc-900 p-4 rounded-2xl border border-zinc-700">
+    <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10">
       <h4 className="text-gray-400 text-sm mb-1">{title}</h4>
       <p
         className={`text-xl font-bold ${
@@ -1134,7 +1135,7 @@ function ModelComparisonPanel({ models }: { models?: MlModels }) {
   const agreement = models.agreement;
 
   return (
-    <div className="mt-8 bg-zinc-900 p-5 rounded-2xl border border-zinc-700">
+    <div className="mt-8 bg-white/[0.04] p-5 rounded-2xl border border-white/10">
 
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-xl font-bold">ML Technique Comparison</h3>
@@ -1168,7 +1169,7 @@ function ModelComparisonPanel({ models }: { models?: MlModels }) {
             subtitle="Classical model on visual features (2nd opinion)"
           />
         ) : (
-          <div className="bg-zinc-900 p-4 rounded-2xl border border-zinc-700">
+          <div className="bg-white/[0.04] p-4 rounded-2xl border border-white/10">
             <h4 className="text-gray-400 text-sm mb-1">Classical model</h4>
             <p className="text-xl font-bold text-gray-500">Not trained</p>
             <p className="text-xs text-gray-600 mt-1">
@@ -1230,7 +1231,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
   };
 
   return (
-    <div className="mt-8 bg-zinc-900 p-5 rounded-2xl border border-zinc-700">
+    <div className="mt-8 bg-white/[0.04] p-5 rounded-2xl border border-white/10">
 
       <div className="flex justify-between items-center mb-4">
         <h3 className="text-xl font-bold">Explain with AI</h3>
@@ -1239,7 +1240,7 @@ function ExplainPanel({ result }: { result: PredictResponse }) {
             className={`text-xs font-bold px-3 py-1 rounded-full border ${
               source === "llm"
                 ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/40"
-                : "bg-zinc-700/40 text-gray-300 border-zinc-600"
+                : "bg-zinc-700/40 text-gray-300 border-white/15"
             }`}
           >
             {source === "llm" ? "AI GENERATED" : "RULE-BASED SUMMARY"}
@@ -1376,9 +1377,9 @@ function SecurityPatternStudio() {
   return (
     <div className="
     mt-10
-    bg-zinc-900
+    bg-white/[0.04]
     border
-    border-zinc-800
+    border-white/10
     rounded-3xl
     shadow-2xl
     p-8
@@ -1409,7 +1410,7 @@ function SecurityPatternStudio() {
           flex-1
           bg-black
           border
-          border-zinc-700
+          border-white/10
           rounded-xl
           px-4
           py-3
@@ -1447,7 +1448,7 @@ function SecurityPatternStudio() {
           className="
           rounded-2xl
           border
-          border-zinc-700
+          border-white/10
           bg-white
           w-full
           max-w-md
@@ -1637,7 +1638,7 @@ function PlainFindings({ result }: { result: PredictResponse }) {
   if (!fa) return null;
 
   return (
-    <div className="mt-8 bg-zinc-900 border border-zinc-700 rounded-2xl p-5">
+    <div className="mt-8 bg-white/[0.04] border border-white/10 rounded-2xl p-5">
 
       <h3 className="text-xl font-bold mb-1">What we checked</h3>
       <p className="text-sm text-gray-500 mb-5">
@@ -1755,37 +1756,50 @@ function ChatAssistant() {
       {/* Floating toggle button */}
       <button
         onClick={() => setOpen((o) => !o)}
-        aria-label="Open help assistant"
+        aria-label={open ? "Close help assistant" : "Open help assistant"}
         className="
         fixed bottom-6 right-6 z-50
-        h-14 w-14 rounded-full
-        bg-indigo-600 hover:bg-indigo-500
-        shadow-2xl
-        flex items-center justify-center
-        text-2xl
-        transition-all
+        h-14 w-14 rounded-2xl
+        bg-gradient-to-br from-indigo-500 to-violet-600
+        hover:from-indigo-400 hover:to-violet-500
+        shadow-[0_10px_30px_-6px_rgba(99,102,241,0.7)]
+        flex items-center justify-center text-white
+        transition-all duration-300 hover:scale-105 active:scale-95
         "
       >
-        {open ? "✕" : "💬"}
+        {open ? (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        ) : (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+          </svg>
+        )}
       </button>
 
       {/* Chat panel */}
       {open && (
         <div className="
         fixed bottom-24 right-6 z-50
-        w-[92vw] max-w-sm
-        h-[28rem]
-        bg-zinc-900 border border-zinc-700
-        rounded-2xl shadow-2xl
-        flex flex-col
-        overflow-hidden
+        w-[92vw] max-w-sm h-[30rem]
+        rounded-3xl border border-white/12
+        bg-[#0c0e16]/95 backdrop-blur-2xl
+        shadow-[0_24px_70px_-12px_rgba(0,0,0,0.8)]
+        flex flex-col overflow-hidden animate-in
         ">
 
-          <div className="px-4 py-3 border-b border-zinc-700 bg-zinc-950">
-            <p className="font-semibold text-sm">Project Help Assistant</p>
-            <p className="text-xs text-gray-500">
-              Ask how the detector works or how to run it
-            </p>
+          <div className="px-4 py-3.5 border-b border-white/10 bg-gradient-to-r from-indigo-500/15 to-violet-500/10 flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 8V4H8" /><rect x="4" y="8" width="16" height="12" rx="2" />
+                <path d="M2 14h2M20 14h2M15 13v2M9 13v2" />
+              </svg>
+            </span>
+            <div>
+              <p className="font-semibold text-sm leading-tight">Help Assistant</p>
+              <p className="text-xs text-gray-400">How it works · how to run it</p>
+            </div>
           </div>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -1799,7 +1813,7 @@ function ChatAssistant() {
                   max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap
                   ${m.role === "user"
                     ? "bg-indigo-600 text-white rounded-br-sm"
-                    : "bg-zinc-800 text-gray-200 rounded-bl-sm"}
+                    : "bg-white/[0.07] text-gray-200 rounded-bl-sm"}
                   `}
                 >
                   {m.content}
@@ -1809,7 +1823,7 @@ function ChatAssistant() {
 
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-zinc-800 text-gray-400 rounded-2xl px-3 py-2 text-sm">
+                <div className="bg-white/[0.07] text-gray-400 rounded-2xl px-3 py-2 text-sm">
                   Thinking…
                 </div>
               </div>
@@ -1821,7 +1835,7 @@ function ChatAssistant() {
                   <button
                     key={s}
                     onClick={() => send(s)}
-                    className="text-xs px-3 py-1.5 rounded-full border border-zinc-600 text-gray-300 hover:bg-zinc-800"
+                    className="text-xs px-3 py-1.5 rounded-full border border-white/15 text-gray-300 hover:bg-white/[0.07]"
                   >
                     {s}
                   </button>
@@ -1830,7 +1844,7 @@ function ChatAssistant() {
             )}
           </div>
 
-          <div className="p-3 border-t border-zinc-700 flex gap-2">
+          <div className="p-3 border-t border-white/10 flex gap-2">
             <input
               type="text"
               value={input}
@@ -1838,7 +1852,7 @@ function ChatAssistant() {
               onKeyDown={(e) => { if (e.key === "Enter") send(); }}
               placeholder="Ask a question…"
               className="
-              flex-1 bg-black border border-zinc-700 rounded-xl
+              flex-1 bg-black border border-white/10 rounded-xl
               px-3 py-2 text-sm text-gray-200
               focus:outline-none focus:border-indigo-500
               "
@@ -1846,12 +1860,18 @@ function ChatAssistant() {
             <button
               onClick={() => send()}
               disabled={loading || !input.trim()}
+              aria-label="Send"
               className="
-              bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
-              px-4 py-2 rounded-xl text-sm font-semibold
+              flex items-center justify-center
+              bg-gradient-to-br from-indigo-500 to-violet-600
+              hover:from-indigo-400 hover:to-violet-500
+              disabled:opacity-40 disabled:cursor-not-allowed
+              px-3.5 rounded-xl text-white transition-all
               "
             >
-              Send
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
             </button>
           </div>
 
