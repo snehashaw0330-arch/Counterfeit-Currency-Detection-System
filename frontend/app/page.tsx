@@ -211,6 +211,78 @@ function stopSpeaking() {
   }
 }
 
+// Build a self-contained, print-ready HTML report (Phase N). Opened in a new
+// window that auto-triggers the browser print dialog → "Save as PDF".
+function buildReportHtml(result: PredictResponse, imageDataUrl: string) {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const verdict = result.prediction ?? "SUSPICIOUS";
+  const d = VERDICT_DISPLAY[verdict] ?? VERDICT_DISPLAY.SUSPICIOUS;
+  const verdictColor = (
+    { REAL: "#16a34a", FAKE: "#dc2626", SUSPICIOUS: "#ca8a04", UNVERIFIED: "#ea580c" }
+  )[verdict] ?? "#444";
+  const denomRaw = result.forensic_analysis?.denomination_classification?.value;
+  const denom = typeof denomRaw === "string" ? `₹${denomRaw}` : "";
+  const serialRaw = result.forensic_analysis?.ocr_serial_number?.value;
+  const serial = typeof serialRaw === "string" ? serialRaw : "—";
+  const when = new Date().toLocaleString();
+
+  const fa = result.forensic_analysis;
+  const rows = fa
+    ? PLAIN_CHECKS.map((c) => {
+        const st = (fa[c.key]?.status ?? "INFO") as "PASS" | "FAIL" | "INFO";
+        const sym = st === "PASS" ? "✓" : st === "FAIL" ? "✗" : "—";
+        const col = st === "PASS" ? "#16a34a" : st === "FAIL" ? "#dc2626" : "#999";
+        const text = st === "PASS" ? c.good : st === "FAIL" ? c.fail : c.info;
+        return `<tr><td style="color:${col};font-weight:700;width:1.4rem">${sym}</td>
+          <td style="white-space:nowrap;padding-right:14px"><b>${esc(c.label)}</b></td>
+          <td style="color:#444">${esc(text)}</td></tr>`;
+      }).join("")
+    : "";
+
+  return `<!doctype html><html><head><meta charset="utf-8">
+  <title>AuthentiNote report ${esc(denom)}</title>
+  <style>
+    *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;margin:0;padding:40px;max-width:820px}
+    h1{font-size:20px;margin:0} .sub{color:#666;font-size:12px;margin-top:2px}
+    .rule{height:3px;background:${verdictColor};border-radius:2px;margin:16px 0}
+    .verdict{font-size:30px;font-weight:800;color:${verdictColor};margin:4px 0}
+    .meaning{color:#444;font-size:13px;margin-bottom:14px}
+    .grid{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+    .meta td{padding:3px 0;font-size:13px} .meta td:first-child{color:#777;padding-right:16px}
+    img{max-width:320px;max-height:240px;border:1px solid #ddd;border-radius:8px}
+    table.checks{border-collapse:collapse;margin-top:8px;width:100%} table.checks td{padding:4px 0;font-size:13px;vertical-align:top}
+    h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin:22px 0 4px}
+    .note{margin-top:24px;font-size:11px;color:#888;border-top:1px solid #eee;padding-top:10px}
+    @media print{body{padding:0}}
+  </style></head>
+  <body onload="setTimeout(function(){window.print()},300)">
+    <h1>AuthentiNote — Counterfeit Currency Screening Report</h1>
+    <div class="sub">Generated ${esc(when)} · screening aid, not a legal determination</div>
+    <div class="rule"></div>
+    <div class="grid">
+      <div style="flex:1;min-width:300px">
+        <div class="verdict">${esc(d.headline)} ${esc(denom)}</div>
+        <div class="meaning">${esc(d.sub)}</div>
+        <table class="meta">
+          <tr><td>Confidence</td><td><b>${esc(result.confidence ?? "—")}</b></td></tr>
+          <tr><td>Serial number</td><td><b>${esc(serial)}</b></td></tr>
+          <tr><td>Verification</td><td><b>${esc(result.verification_level ?? "—")}</b></td></tr>
+          <tr><td>Forensic checks passed</td><td><b>${result.forensic_pass_count ?? 0} / ${result.forensic_total_checks ?? 0}</b></td></tr>
+        </table>
+      </div>
+      ${imageDataUrl ? `<div><img src="${imageDataUrl}" alt="note"/></div>` : ""}
+    </div>
+    ${result.guidance ? `<div class="meaning" style="margin-top:12px">⚠ ${esc(result.guidance)}</div>` : ""}
+    <h2>What we checked</h2>
+    <table class="checks"><tbody>${rows}</tbody></table>
+    <div class="note">This automated screening uses a phone-photo image and can be wrong, especially on
+    high-quality counterfeits. Always verify suspicious notes by hand (tilt for colour-shift, hold to
+    light for the watermark, feel the raised print) or at a bank. Indian Rupees only.</div>
+  </body></html>`;
+}
+
 export default function Home() {
 
   // =====================================================
@@ -254,6 +326,29 @@ export default function Home() {
     e.preventDefault();
     setDragOver(false);
     acceptFile(e.dataTransfer.files?.[0]);
+  };
+
+  // Phase N — open a print-ready report in a new window (Save as PDF).
+  const downloadReport = () => {
+    if (!result) return;
+    const open = (imgUrl: string) => {
+      const w = window.open("", "_blank");
+      if (!w) {
+        alert("Allow pop-ups to download the report.");
+        return;
+      }
+      w.document.write(buildReportHtml(result, imgUrl));
+      w.document.close();
+    };
+    if (selectedImage) {
+      const reader = new FileReader();
+      reader.onloadend = () =>
+        open(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => open("");
+      reader.readAsDataURL(selectedImage);
+    } else {
+      open("");
+    }
   };
 
   // =====================================================
@@ -527,6 +622,21 @@ export default function Home() {
             {/* ================================================= */}
 
             <VerdictBanner result={result} lang={lang} />
+
+            {/* Report download (Phase N) */}
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={downloadReport}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-gray-200 hover:bg-white/10 transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Download report (PDF)
+              </button>
+            </div>
 
             {/* ================================================= */}
             {/* WHAT WE FOUND — grouped plain findings (Phase K) */}
