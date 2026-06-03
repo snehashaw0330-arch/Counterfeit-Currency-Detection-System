@@ -43,8 +43,16 @@ Working in order, one solid commit per phase:
 - **No-regression re-measure (post Phase E–L):** genuine 31 REAL / 11 SUSP / 0
   FAKE / 0 UNVER (**0% false positives held**, clearing 71%→74%); fake 10 REAL /
   7 SUSP / 5 FAKE / 1 UNVER (fakes-as-REAL 9→10, the accepted Gandhi-INFO trade).
-- **Remaining:** final full pytest suite green, commit polish (README, REPORT,
-  calibrate, CALIBRATION.md, STATUS), offer push.
+- **Full suite GREEN: 137 passed** (~9 min, incl. the live Phase-A OCR tests
+  that exercise the changed OCR path — the [1100,1800] OCR-width optimization
+  regressed nothing). frontend tsc + next build clean.
+- **Perf fix:** `/predict` OCR was ~23s (EasyOCR at 1800px ×2 on CPU); bounded
+  to [1100,1800] → ~2.4x faster on the low-res path, same accuracy. Needs a
+  uvicorn restart to take effect on a running backend.
+- **Lesson recorded:** never run CPU-heavy model passes (eval/calibration/full
+  suite) in the background while the user has the local app open — it starves
+  the live backend (made /predict, /chat, /security-pattern appear "stuck").
+- **State:** all committed locally; ready to push to origin/main on request.
 
 
 
