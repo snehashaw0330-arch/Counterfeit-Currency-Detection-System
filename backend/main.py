@@ -26,6 +26,10 @@ from backend.forensic import (
 from backend.classical import predict_classical, warmup_classical
 from backend.genai import explain as genai_explain, llm_available
 from backend.security_pattern import pattern_png
+from backend.chatbot import (
+    answer as chatbot_answer,
+    llm_available as chatbot_llm_available,
+)
 
 # Reject absurd uploads early (DoS / accidental huge files). 25 MB
 # comfortably covers a high-res phone photo.
@@ -327,6 +331,30 @@ async def explain_result(payload: dict = Body(...)):
             "status": "success",
             "llm_available": llm_available(),
             "explanation": genai_explain(payload),
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# =====================================================
+# CHAT — project help assistant — Phase L
+# =====================================================
+
+@app.post("/chat")
+async def chat(payload: dict = Body(...)):
+    """Answer a help question about how this project works / how to run it.
+    Uses Claude when ANTHROPIC_API_KEY is set, otherwise a deterministic FAQ.
+    Never fails the request."""
+    try:
+        result = chatbot_answer(
+            payload.get("message", ""),
+            payload.get("history", []),
+        )
+        return {
+            "status": "success",
+            "llm_available": chatbot_llm_available(),
+            "reply": result["reply"],
+            "source": result["source"],
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}

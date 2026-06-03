@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
 type ProportionValue = {
@@ -796,6 +796,12 @@ export default function Home() {
       {/* ================================================= */}
 
       <SecurityPatternStudio />
+
+      {/* ================================================= */}
+      {/* HELP CHATBOT (Phase L) — floating assistant */}
+      {/* ================================================= */}
+
+      <ChatAssistant />
 
     </main>
   );
@@ -1621,5 +1627,182 @@ function PlainFindings({ result }: { result: PredictResponse }) {
       </div>
 
     </div>
+  );
+}
+
+// =====================================================
+// HELP CHATBOT (Phase L)
+// =====================================================
+// A floating assistant that answers "how does this work / how do I run it /
+// what does this verdict mean". Talks to POST /chat, which uses Claude when an
+// API key is set and a deterministic FAQ otherwise — so it works in a live
+// demo with no internet.
+
+type ChatMsg = { role: "user" | "assistant"; content: string };
+
+const CHAT_GREETING: ChatMsg = {
+  role: "assistant",
+  content:
+    "Hi! I'm the help assistant for this project. Ask me how it works, how to " +
+    "run it, what a verdict means, or what the Security Pattern Studio is.",
+};
+
+const CHAT_SUGGESTIONS = [
+  "How does it work?",
+  "What does UNVERIFIED mean?",
+  "How accurate is it?",
+];
+
+function ChatAssistant() {
+
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([CHAT_GREETING]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, open]);
+
+  const send = async (text?: string) => {
+    const message = (text ?? input).trim();
+    if (!message || loading) return;
+
+    const history = messages;
+    setMessages((m) => [...m, { role: "user", content: message }]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const r = await axios.post(`${BACKEND}/chat`, { message, history });
+      const reply =
+        r.data?.status === "success" && r.data.reply
+          ? r.data.reply
+          : "Sorry, I couldn't answer that. Is the backend running on port 8000?";
+      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          content:
+            "I couldn't reach the backend. Make sure it's running " +
+            "(uvicorn backend.main:app on port 8000).",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Floating toggle button */}
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Open help assistant"
+        className="
+        fixed bottom-6 right-6 z-50
+        h-14 w-14 rounded-full
+        bg-indigo-600 hover:bg-indigo-500
+        shadow-2xl
+        flex items-center justify-center
+        text-2xl
+        transition-all
+        "
+      >
+        {open ? "✕" : "💬"}
+      </button>
+
+      {/* Chat panel */}
+      {open && (
+        <div className="
+        fixed bottom-24 right-6 z-50
+        w-[92vw] max-w-sm
+        h-[28rem]
+        bg-zinc-900 border border-zinc-700
+        rounded-2xl shadow-2xl
+        flex flex-col
+        overflow-hidden
+        ">
+
+          <div className="px-4 py-3 border-b border-zinc-700 bg-zinc-950">
+            <p className="font-semibold text-sm">Project Help Assistant</p>
+            <p className="text-xs text-gray-500">
+              Ask how the detector works or how to run it
+            </p>
+          </div>
+
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`
+                  max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap
+                  ${m.role === "user"
+                    ? "bg-indigo-600 text-white rounded-br-sm"
+                    : "bg-zinc-800 text-gray-200 rounded-bl-sm"}
+                  `}
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-zinc-800 text-gray-400 rounded-2xl px-3 py-2 text-sm">
+                  Thinking…
+                </div>
+              </div>
+            )}
+
+            {messages.length === 1 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {CHAT_SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => send(s)}
+                    className="text-xs px-3 py-1.5 rounded-full border border-zinc-600 text-gray-300 hover:bg-zinc-800"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-zinc-700 flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+              placeholder="Ask a question…"
+              className="
+              flex-1 bg-black border border-zinc-700 rounded-xl
+              px-3 py-2 text-sm text-gray-200
+              focus:outline-none focus:border-indigo-500
+              "
+            />
+            <button
+              onClick={() => send()}
+              disabled={loading || !input.trim()}
+              className="
+              bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50
+              px-4 py-2 rounded-xl text-sm font-semibold
+              "
+            >
+              Send
+            </button>
+          </div>
+
+        </div>
+      )}
+    </>
   );
 }

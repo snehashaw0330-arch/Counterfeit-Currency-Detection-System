@@ -6,7 +6,23 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-03 (Phase K — trustworthy + understandable results)
+**Last updated:** 2026-06-03 (Phase L — help chatbot; full-roadmap build in progress)
+
+## 🚧 Full-roadmap build (user mandate: "complete everything, no loose ends, demo-perfect")
+
+Working in order, one solid commit per phase:
+- **Phase L (help chatbot) — DONE.** `backend/chatbot.py` (`answer()` → {reply,
+  source}; Claude Haiku w/ cached project-knowledge system prompt when key set,
+  deterministic keyword-FAQ fallback otherwise; safety refusal for "make fake
+  money"; never raises). `POST /chat` in main.py. Floating `ChatAssistant` widget
+  in the frontend (suggestions, history, source-aware). 18 FAQ tests green;
+  `tests/test_phase_l_chat.py`; tsc + next build clean.
+- **Next:** Phase E.3 identification mark, E.4 bleed lines, E.1 motif (INFO),
+  E.5 see-through; Phase G.3 region overlays; Phase F.2 threshold calibration;
+  demo polish (gallery, README/REPORT). All honest (INFO when not assessable;
+  never false-FAIL a genuine note).
+
+
 
 ## ✅ Phase K — readability gate, verdict honesty, plain-language UI
 
