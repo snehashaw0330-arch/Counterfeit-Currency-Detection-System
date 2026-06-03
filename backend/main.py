@@ -22,6 +22,7 @@ from backend.forensic import (
     warmup_ocr,
     diagnostics,
     assess_readability,
+    note_region,
 )
 from backend.classical import predict_classical, warmup_classical
 from backend.genai import explain as genai_explain, llm_available
@@ -238,6 +239,14 @@ def _analyze(rgb_array, bgr_image):
 
     final_confidence = round(max(combined_score, 1 - combined_score) * 100, 2)
 
+    # ---- detected regions (for the frontend overlay) — Phase G.3 ----
+    # Normalised [0,1] polygon of the located note in the ORIGINAL image's
+    # coordinates, so the UI can draw "detected note here" over the upload.
+    regions = []
+    note_poly = note_region(bgr_image)
+    if note_poly:
+        regions.append({"label": "Detected note", "polygon": note_poly})
+
     # ---- classical ML second opinion (display-only) ----
     classical = predict_classical(bgr_image)
     ml_models = {
@@ -260,6 +269,7 @@ def _analyze(rgb_array, bgr_image):
         "verification_level": readability["level"],
         "verification": readability,
         "guidance": readability["guidance"],
+        "regions": regions,
         "confidence": f"{final_confidence:.2f}%",
         "raw_prediction": prediction,
         "model_verdict": model_verdict,

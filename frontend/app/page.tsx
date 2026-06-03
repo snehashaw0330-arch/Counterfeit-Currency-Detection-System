@@ -28,6 +28,8 @@ type ForensicAnalysis = {
   hologram_detection: ForensicCheck;
   denomination_classification: ForensicCheck;
   proportion_analysis: ForensicCheck;
+  bleed_line_detection: ForensicCheck;
+  identification_mark: ForensicCheck;
   modular_ai_pipeline: ForensicCheck;
 };
 
@@ -70,6 +72,11 @@ type Verification = {
   guidance: string;
 };
 
+type Region = {
+  label: string;
+  polygon: [number, number][];
+};
+
 type Verdict = "REAL" | "FAKE" | "SUSPICIOUS" | "UNVERIFIED";
 
 type PredictResponse = {
@@ -79,6 +86,7 @@ type PredictResponse = {
   verification_level?: "full" | "partial" | "none";
   verification?: Verification;
   guidance?: string;
+  regions?: Region[];
   confidence?: string;
   raw_prediction?: number;
   model_verdict?: "REAL" | "FAKE";
@@ -345,11 +353,11 @@ export default function Home() {
           "
         />
 
-        {/* IMAGE PREVIEW */}
+        {/* IMAGE PREVIEW (with detected-note overlay — Phase G.3) */}
 
         {preview && (
 
-          <div className="mb-8">
+          <div className="mb-8 relative w-full">
 
             <img
               src={preview}
@@ -357,13 +365,41 @@ export default function Home() {
               className="
               rounded-2xl
               w-full
-              h-72
-              object-contain
+              h-auto
+              block
               border
               border-zinc-700
               bg-black
               "
             />
+
+            {/* Detected-region overlay: polygons are normalised [0,1] in the
+                original image's coordinates, so with the image rendered at
+                full width / natural height the SVG aligns exactly. */}
+            {result?.regions && result.regions.length > 0 && (
+              <svg
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                viewBox="0 0 1 1"
+                preserveAspectRatio="none"
+              >
+                {result.regions.map((r, i) => (
+                  <polygon
+                    key={i}
+                    points={r.polygon.map((p) => `${p[0]},${p[1]}`).join(" ")}
+                    fill="rgba(34,197,94,0.12)"
+                    stroke="rgb(74,222,128)"
+                    strokeWidth="0.006"
+                    strokeLinejoin="round"
+                  />
+                ))}
+              </svg>
+            )}
+
+            {result?.regions && result.regions.length > 0 && (
+              <span className="absolute top-2 left-2 text-xs font-semibold bg-green-500/90 text-black px-2 py-0.5 rounded-md">
+                Detected note
+              </span>
+            )}
 
           </div>
         )}
@@ -777,6 +813,16 @@ export default function Home() {
                 <FeatureCard
                   title="Proportion Analysis"
                   check={result?.forensic_analysis?.proportion_analysis}
+                />
+
+                <FeatureCard
+                  title="Bleed Lines (edge)"
+                  check={result?.forensic_analysis?.bleed_line_detection}
+                />
+
+                <FeatureCard
+                  title="Identification Mark (tactile)"
+                  check={result?.forensic_analysis?.identification_mark}
                 />
 
                 <FeatureCard
@@ -1553,6 +1599,14 @@ const PLAIN_CHECKS: PlainCheck[] = [
     good: "Fine micro-print looks intact.",
     fail: "Fine micro-print looks lost.",
     info: "Photo isn't sharp enough to check the tiny print." },
+  { key: "bleed_line_detection", group: "Security features", label: "Bleed lines",
+    good: "The edge bleed-line count matches a real note of this value.",
+    fail: "The edge bleed-line count looks wrong.",
+    info: "Couldn't count the edge bleed lines at this resolution." },
+  { key: "identification_mark", group: "Security features", label: "ID mark (touch)",
+    good: "A raised identification mark is present where it should be.",
+    fail: "The identification mark looks wrong.",
+    info: "Couldn't confirm the raised identification mark — it's a touch feature." },
   { key: "structural_sanity", group: "Look & feel", label: "Overall look",
     good: "Overall structure looks like a banknote.",
     fail: "Doesn't look like a proper banknote.",

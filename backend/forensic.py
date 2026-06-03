@@ -237,6 +237,27 @@ def _order_quad(pts):
     return np.array([tl, tr, br, bl], dtype=np.float32)
 
 
+def note_region(image):
+    """Return the detected banknote's 4 corner points normalised to [0,1] in the
+    ORIGINAL image coordinates (ordered TL, TR, BR, BL), or None if no note quad
+    is found. Used by the frontend to draw a 'detected note' overlay on the
+    uploaded photo. Never raises."""
+    try:
+        img = _ensure_bgr(image)
+        h, w = img.shape[:2]
+        if w < 1 or h < 1:
+            return None
+        det = _detect_note_quad(img)
+        if det is None:
+            return None
+        return [
+            [round(float(x) / w, 4), round(float(y) / h, 4)]
+            for (x, y) in det["quad"]
+        ]
+    except Exception:
+        return None
+
+
 def _detect_note_quad(image):
     """Find the largest banknote-shaped 4-sided contour in the
     image. Returns a dict with `quad` (4×2 ordered TL/TR/BR/BL),
@@ -2822,6 +2843,177 @@ def diagnostics(image):
 
 
 # =====================================================
+# BLEED LINES (Phase E.4)
+# =====================================================
+# The Mahatma Gandhi New Series prints raised angular "bleed lines" at the left
+# and right edges; the count is denomination-specific (a tactile feature for the
+# visually impaired). We count line-like bands in thin edge strips and compare
+# to the expected count. Honest by design: INFO when the photo is too low-
+# resolution to resolve the lines (the usual phone-thumbnail case), PASS on a
+# match. We deliberately never FAIL — at phone resolution a miscount is far more
+# likely a resolution problem than a forgery, and we don't false-fail genuine
+# notes (same rule as micro-print / the rejected ORB motif check).
+
+_BLEED_LINE_COUNTS = {"100": 4, "200": 4, "500": 5, "2000": 7}
+_BLEED_MIN_WIDTH = 900
+
+
+def _count_edge_bands(strip):
+    """Count distinct horizontal/angled line bands in an edge strip.
+
+    Vertical-gradient row profile → smoothed (to merge fine note texture into
+    the actual bleed-line bands) → hysteresis peak count with a minimum spacing
+    so adjacent rows of one line aren't counted twice."""
+    if strip is None or strip.size == 0:
+        return 0
+    gray = cv2.cvtColor(strip, cv2.COLOR_BGR2GRAY)
+    grad = cv2.convertScaleAbs(cv2.Sobel(gray, cv2.CV_16S, 0, 1, ksize=3))
+    profile = grad.mean(axis=1).astype(np.float32)
+    n = profile.size
+    if n < 8 or float(profile.max()) < 1.0:
+        return 0
+    # Smooth over ~2.5% of the strip height to suppress texture speckle.
+    win = max(3, n // 40)
+    profile = np.convolve(profile, np.ones(win, np.float32) / win, mode="same")
+    profile /= float(profile.max())
+    hi, lo = 0.55, 0.35
+    min_gap = max(3, n // 25)  # bands closer than this are treated as one
+    count, above, last = 0, False, -10 ** 9
+    for i, v in enumerate(profile):
+        if v >= hi and not above and (i - last) >= min_gap:
+            count += 1
+            above = True
+            last = i
+        elif v < lo:
+            above = False
+    return count
+
+
+def analyze_bleed_lines(image, denomination=None):
+    """Count the edge bleed lines and compare to the RBI count for the
+    denomination. PASS on a match, INFO otherwise. Never raises, never FAILs."""
+    try:
+        if denomination not in _BLEED_LINE_COUNTS:
+            return {
+                "status": "INFO",
+                "details": "No bleed-line specification for this denomination",
+                "value": None,
+            }
+        img = _ensure_bgr(image)
+        h, w = img.shape[:2]
+        expected = _BLEED_LINE_COUNTS[denomination]
+        if w < _BLEED_MIN_WIDTH:
+            return {
+                "status": "INFO",
+                "details": (
+                    f"Image too low-resolution ({w}px wide) to count the edge "
+                    f"bleed lines — a genuine Rs {denomination} has {expected} "
+                    f"per side; check by eye"
+                ),
+                "value": {"expected": expected},
+            }
+        y0, y1 = int(h * 0.20), int(h * 0.80)
+        cl = _count_edge_bands(img[y0:y1, 0:int(w * 0.06)])
+        cr = _count_edge_bands(img[y0:y1, int(w * 0.94):w])
+        detected = max(cl, cr)
+        value = {
+            "expected": expected,
+            "detected_left": cl,
+            "detected_right": cr,
+        }
+        if abs(detected - expected) <= 1:
+            return {
+                "status": "PASS",
+                "details": (
+                    f"~{detected} bleed lines found at the edge "
+                    f"(expected {expected} for Rs {denomination})"
+                ),
+                "value": value,
+            }
+        return {
+            "status": "INFO",
+            "details": (
+                f"Edge bleed lines unclear (~{detected} found, expected "
+                f"{expected} for Rs {denomination}) — verify by eye/touch"
+            ),
+            "value": value,
+        }
+    except Exception as exc:
+        return {
+            "status": "INFO",
+            "details": f"Bleed-line check unavailable: {exc}",
+            "value": None,
+        }
+
+
+# =====================================================
+# IDENTIFICATION MARK (Phase E.3)
+# =====================================================
+# A raised intaglio geometric shape (tactile, for the visually impaired) whose
+# shape differs by denomination. Reliable shape classification from a phone photo
+# is not feasible, so this is an honest *presence + manual-guidance* check: it
+# measures whether a raised, high-contrast compact feature exists in the expected
+# band and tells the user which shape a genuine note should have, to confirm by
+# touch. Never FAILs (absence on a low-res photo is not proof of a fake).
+
+_ID_MARK_SHAPES = {
+    "50": "square", "100": "triangle", "200": "H-shape",
+    "500": "circle", "2000": "rectangle",
+}
+
+
+def analyze_identification_mark(image, denomination=None):
+    """Presence + manual-verification guidance for the tactile identification
+    mark. PASS when a raised feature is clearly present on a well-resolved note,
+    INFO otherwise. Never raises, never FAILs."""
+    try:
+        shape = _ID_MARK_SHAPES.get(denomination)
+        if shape is None:
+            return {
+                "status": "INFO",
+                "details": "No identification-mark specification for this denomination",
+                "value": None,
+            }
+        img = _ensure_bgr(image)
+        h, w = img.shape[:2]
+        # Loose expected band: middle height, just left of the watermark window.
+        region = img[int(h * 0.30):int(h * 0.75), int(w * 0.52):int(w * 0.72)]
+        guidance = (
+            f"A genuine Rs {denomination} has a raised {shape} identification "
+            f"mark here that you can feel by touch"
+        )
+        if region.size == 0:
+            return {"status": "INFO", "details": guidance, "value": {"shape": shape}}
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+        density = float(cv2.Canny(gray, 50, 150).mean())
+        value = {"shape": shape, "edge_density": round(density, 2)}
+        if w >= 700 and density > 8.0:
+            return {
+                "status": "PASS",
+                "details": (
+                    f"A raised feature is present where the {shape} "
+                    f"identification mark sits on a genuine Rs {denomination} "
+                    f"(confirm by touch)"
+                ),
+                "value": value,
+            }
+        return {
+            "status": "INFO",
+            "details": (
+                f"Couldn't confirm the identification mark at this resolution — "
+                f"{guidance.lower()}"
+            ),
+            "value": value,
+        }
+    except Exception as exc:
+        return {
+            "status": "INFO",
+            "details": f"Identification-mark check unavailable: {exc}",
+            "value": None,
+        }
+
+
+# =====================================================
 # PIPELINE ORCHESTRATOR
 # =====================================================
 
@@ -2890,6 +3082,26 @@ def run_forensic_pipeline(image):
             "status": "INFO",
             "details": f"Error: {exc}",
             "value": None,
+        }
+
+    # Denomination-aware tactile-feature checks (Phase E). Like proportions
+    # they need the denomination; they run on the located (cropped) note.
+    denom_value = (
+        results.get("denomination_classification", {}).get("value")
+    )
+    try:
+        results["bleed_line_detection"] = analyze_bleed_lines(image, denom_value)
+    except Exception as exc:
+        results["bleed_line_detection"] = {
+            "status": "INFO", "details": f"Error: {exc}", "value": None,
+        }
+    try:
+        results["identification_mark"] = analyze_identification_mark(
+            image, denom_value
+        )
+    except Exception as exc:
+        results["identification_mark"] = {
+            "status": "INFO", "details": f"Error: {exc}", "value": None,
         }
 
     results["modular_ai_pipeline"] = {

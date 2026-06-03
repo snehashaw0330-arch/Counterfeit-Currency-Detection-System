@@ -6,21 +6,33 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-03 (Phase L — help chatbot; full-roadmap build in progress)
+**Last updated:** 2026-06-03 (Phases L, E, G.3 done; full-roadmap build in progress)
 
 ## 🚧 Full-roadmap build (user mandate: "complete everything, no loose ends, demo-perfect")
 
 Working in order, one solid commit per phase:
-- **Phase L (help chatbot) — DONE.** `backend/chatbot.py` (`answer()` → {reply,
-  source}; Claude Haiku w/ cached project-knowledge system prompt when key set,
-  deterministic keyword-FAQ fallback otherwise; safety refusal for "make fake
-  money"; never raises). `POST /chat` in main.py. Floating `ChatAssistant` widget
-  in the frontend (suggestions, history, source-aware). 18 FAQ tests green;
-  `tests/test_phase_l_chat.py`; tsc + next build clean.
-- **Next:** Phase E.3 identification mark, E.4 bleed lines, E.1 motif (INFO),
-  E.5 see-through; Phase G.3 region overlays; Phase F.2 threshold calibration;
-  demo polish (gallery, README/REPORT). All honest (INFO when not assessable;
-  never false-FAIL a genuine note).
+- **Phase L (help chatbot) — DONE (72dd33b).** `backend/chatbot.py` + `POST /chat`
+  + floating `ChatAssistant` widget. Claude Haiku w/ cached project-knowledge
+  prompt when key set; deterministic keyword-FAQ fallback; safety refusal; never
+  raises. 18 tests.
+- **Phase E (tactile security features) — DONE.** `analyze_bleed_lines` (counts
+  edge bleed lines vs the RBI per-denomination count: 100→4, 200→4, 500→5,
+  2000→7) and `analyze_identification_mark` (presence + manual-touch guidance,
+  shape per denom). Both **honest**: PASS on positive evidence, INFO otherwise,
+  **never FAIL** (a phone-photo miscount is a resolution problem, not forgery).
+  Wired into pipeline + EXPECTED_KEYS (now 14 checks) + frontend type/grid/plain
+  findings. `tests/test_phase_e_tactile.py` (15). NOTE: E.1 motif and E.5 see-
+  through were deliberately NOT shipped as hollow always-INFO checks (no
+  placeholders) — figures/motifs are covered by the portrait check; see-through
+  stays a documented single-side limitation (scope §5).
+- **Phase G.3 (detected-note overlay) — DONE.** `forensic.note_region()` →
+  normalised [0,1] note polygon in ORIGINAL coords; `/predict` returns `regions`;
+  frontend draws a green SVG overlay + "Detected note" tag on the upload.
+  `tests/test_phase_g_regions.py` (4).
+- **Next:** Phase F.2 ROC/PR threshold calibration (documented, data-bound),
+  then demo polish (sample gallery, README/REPORT refresh) + final full-suite
+  green + re-run end-to-end eval (confirm no regression from the new checks /
+  Gandhi FAIL→INFO).
 
 
 

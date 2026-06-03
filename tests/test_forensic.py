@@ -23,6 +23,8 @@ EXPECTED_KEYS = {
     "hologram_detection",
     "denomination_classification",
     "proportion_analysis",
+    "bleed_line_detection",
+    "identification_mark",
     "modular_ai_pipeline",
 }
 
