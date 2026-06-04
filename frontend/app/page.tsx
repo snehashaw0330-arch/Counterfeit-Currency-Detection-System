@@ -88,6 +88,7 @@ type PredictResponse = {
   verification?: Verification;
   guidance?: string;
   regions?: Region[];
+  heatmap?: string | null;
   confidence?: string;
   raw_prediction?: number;
   model_verdict?: "REAL" | "FAKE";
@@ -308,6 +309,8 @@ export default function Home() {
 
   const [cameraOpen, setCameraOpen] = useState(false);
 
+  const [showHeatmap, setShowHeatmap] = useState(false);
+
   // =====================================================
   // HANDLE IMAGE CHANGE
   // =====================================================
@@ -317,6 +320,7 @@ export default function Home() {
     setSelectedImage(file);
     setPreview(URL.createObjectURL(file));
     setResult(null);
+    setShowHeatmap(false);
   };
 
   const handleImageChange = (
@@ -584,6 +588,33 @@ export default function Home() {
                 <span className="h-1.5 w-1.5 rounded-full bg-black/70" />
                 Detected note
               </span>
+            )}
+
+            {/* Grad-CAM heatmap overlay (Phase P.2) — where the AI looked */}
+            {showHeatmap && result?.heatmap && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={result.heatmap}
+                alt="AI attention heatmap"
+                className="absolute inset-0 w-full h-full pointer-events-none mix-blend-screen"
+              />
+            )}
+
+            {result?.heatmap && (
+              <button
+                onClick={() => setShowHeatmap((s) => !s)}
+                className={`absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg shadow-lg transition-colors ${
+                  showHeatmap
+                    ? "bg-fuchsia-500 text-white"
+                    : "bg-black/70 text-gray-200 hover:bg-black/90"
+                }`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7z" />
+                </svg>
+                {showHeatmap ? "Hide AI heatmap" : "Show AI heatmap"}
+              </button>
             )}
 
           </div>

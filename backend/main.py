@@ -15,6 +15,7 @@ from PIL import Image
 
 import io
 import os
+import base64
 import threading
 
 from backend.forensic import (
@@ -31,6 +32,7 @@ from backend.chatbot import (
     answer as chatbot_answer,
     llm_available as chatbot_llm_available,
 )
+from backend.gradcam import compute_heatmap
 
 # Reject absurd uploads early (DoS / accidental huge files). 25 MB
 # comfortably covers a high-res phone photo.
@@ -159,6 +161,30 @@ def _decode_upload(image_bytes):
 
 
 # =====================================================
+# GRAD-CAM OVERLAY (Phase P.2) — best-effort, never raises
+# =====================================================
+
+def _heatmap_overlay(model_input, rgb_array):
+    """Return an RGBA PNG data URL of the Grad-CAM heatmap sized to the original
+    image (transparent where the model didn't look), or None. Never raises."""
+    try:
+        cam = compute_heatmap(model, model_input)
+        if cam is None:
+            return None
+        h, w = rgb_array.shape[:2]
+        big = np.clip(cv2.resize(cam, (w, h)), 0.0, 1.0)
+        colour = cv2.applyColorMap(np.uint8(255 * big), cv2.COLORMAP_JET)
+        rgb = cv2.cvtColor(colour, cv2.COLOR_BGR2RGB)
+        alpha = np.uint8(big * 180)            # hot = opaque, cold = transparent
+        rgba = np.dstack([rgb, alpha])
+        buf = io.BytesIO()
+        Image.fromarray(rgba, "RGBA").save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
+# =====================================================
 # CORE ANALYSIS (shared by /predict and /diagnose)
 # =====================================================
 
@@ -172,6 +198,9 @@ def _analyze(rgb_array, bgr_image):
         cv2.resize(rgb_array, (224, 224)) / 255.0, axis=0
     )
     prediction = float(model.predict(model_input)[0][0])
+
+    # Grad-CAM explainability heatmap (best-effort; None if unavailable).
+    heatmap = _heatmap_overlay(model_input, rgb_array)
 
     # ---- model (CNN) verdict ----
     if prediction >= 0.5:
@@ -270,6 +299,7 @@ def _analyze(rgb_array, bgr_image):
         "verification": readability,
         "guidance": readability["guidance"],
         "regions": regions,
+        "heatmap": heatmap,
         "confidence": f"{final_confidence:.2f}%",
         "raw_prediction": prediction,
         "model_verdict": model_verdict,
