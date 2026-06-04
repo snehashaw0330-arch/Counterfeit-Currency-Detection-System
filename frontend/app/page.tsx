@@ -2050,6 +2050,38 @@ const CHAT_SUGGESTIONS = [
 
 const CHAT_STORE_KEY = "anc_chat_v1";
 
+// Minimal typings for the Web Speech API (SpeechRecognition is not part of the
+// standard DOM lib and is vendor-prefixed on Chromium). Just enough to dictate
+// a chat question without resorting to `any`.
+interface SpeechRecognitionAlt { transcript: string }
+interface SpeechRecognitionResultLike { 0: SpeechRecognitionAlt; isFinal: boolean }
+interface SpeechRecognitionEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((e: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((e: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  onstart: (() => void) | null;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+function getSpeechRecognition(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
 function ChatAssistant() {
 
   const [open, setOpen] = useState(false);
@@ -2057,7 +2089,61 @@ function ChatAssistant() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  // Feature-detect speech recognition on the client only (avoids any SSR
+  // mismatch; absent on Firefox/older Safari where we just hide the mic).
+  useEffect(() => {
+    setVoiceSupported(getSpeechRecognition() !== null);
+  }, []);
+
+  // Abort any in-flight dictation if the widget unmounts.
+  useEffect(() => () => recognitionRef.current?.abort(), []);
+
+  // Voice INPUT — dictate a question into the box (pairs with the "Listen" TTS).
+  // Tap to start, tap again (or finish speaking) to stop; the transcript fills
+  // the input live so the user can review/edit before sending. Default en-IN.
+  const toggleListen = () => {
+    if (loading) return;
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SR = getSpeechRecognition();
+    if (!SR) return;
+
+    const rec = new SR();
+    rec.lang = "en-IN";
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+
+    // Preserve whatever the user already typed; dictation appends to it.
+    const base = input.trim();
+    rec.onresult = (e) => {
+      let transcript = "";
+      for (let i = 0; i < e.results.length; i++) {
+        transcript += e.results[i][0].transcript;
+      }
+      setInput((base ? base + " " : "") + transcript.trim());
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = rec;
+    try {
+      rec.start();
+      setListening(true);
+    } catch {
+      // start() throws if already running — treat as a no-op.
+      setListening(false);
+    }
+  };
 
   // Restore the conversation on mount so it survives closing the panel AND a
   // page refresh.
@@ -2100,6 +2186,9 @@ function ChatAssistant() {
   const send = async (text?: string) => {
     const message = (text ?? input).trim();
     if (!message || loading) return;
+
+    // Release the mic if a message is sent mid-dictation.
+    recognitionRef.current?.stop();
 
     const history = messages;
     setMessages((m) => [...m, { role: "user", content: message }]);
@@ -2235,12 +2324,33 @@ function ChatAssistant() {
           </div>
 
           <div className="p-3 border-t border-white/10 flex gap-2">
+            {voiceSupported && (
+              <button
+                onClick={toggleListen}
+                disabled={loading}
+                aria-label={listening ? "Stop dictation" : "Speak your question"}
+                title={listening ? "Stop listening" : "Speak your question"}
+                className={`
+                flex items-center justify-center px-3 rounded-xl transition-all
+                disabled:opacity-40 disabled:cursor-not-allowed
+                ${listening
+                  ? "bg-red-500/90 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.25)] animate-pulse"
+                  : "bg-white/[0.06] text-gray-300 border border-white/10 hover:bg-white/10 hover:text-white"}
+                `}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="2" width="6" height="11" rx="3" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
+                </svg>
+              </button>
+            )}
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-              placeholder="Ask a question…"
+              placeholder={listening ? "Listening… speak now" : "Ask a question…"}
               className="
               flex-1 bg-black border border-white/10 rounded-xl
               px-3 py-2 text-sm text-gray-200
