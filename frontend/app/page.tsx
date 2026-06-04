@@ -2292,12 +2292,27 @@ function CameraModal({
   const capture = () => {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // Crop to the central banknote-shaped framing box (must match the on-screen
+    // guide below) so the captured image is mostly the NOTE, not the room —
+    // this is what makes the denomination/serial actually readable.
+    let cw = Math.round(vw * 0.86);
+    let ch = Math.round(cw / 2.0);          // ~banknote aspect
+    if (ch > vh * 0.9) {
+      ch = Math.round(vh * 0.9);
+      cw = Math.min(vw, Math.round(ch * 2.0));
+    }
+    const cx = Math.round((vw - cw) / 2);
+    const cy = Math.round((vh - ch) / 2);
+
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = cw;
+    canvas.height = ch;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
@@ -2305,7 +2320,7 @@ function CameraModal({
         onCapture(new File([blob], "camera-capture.jpg", { type: "image/jpeg" }));
       },
       "image/jpeg",
-      0.92
+      0.95
     );
   };
 
@@ -2380,11 +2395,12 @@ function CameraModal({
                   Starting camera…
                 </div>
               )}
-              <div className="pointer-events-none absolute inset-6 rounded-xl border-2 border-dashed border-emerald-400/50" />
+              {/* Banknote-shaped guide — ONLY this box is captured. */}
+              <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[86%] aspect-[2/1] max-h-[88%] rounded-xl border-2 border-dashed border-emerald-400/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
             </div>
 
-            <p className="text-xs text-gray-500 mt-3 text-center">
-              Fill the frame with the note, hold steady in good light, then capture.
+            <p className="text-xs text-gray-400 mt-3 text-center">
+              Put the note <span className="text-emerald-300 font-medium">inside the green box and fill it</span> — only the box is captured. Hold steady in good light.
             </p>
 
             <div className="mt-4 flex gap-3">
