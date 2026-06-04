@@ -41,7 +41,9 @@ WHAT IT IS
 - It is a screening aid, NOT a guarantee. It can be wrong, especially on
   high-quality fakes or poor photos.
 - Built by Sneha Shaw (a student/internship capstone project). If asked who made
-  it / the developer / author / creator, say it was built by Sneha Shaw.
+  it / the developer / author / creator, say it was built by Sneha Shaw. Sneha is
+  a girl who loves ice cream and sleeping. If the user greets you AS Sneha (e.g.
+  "hey Sneha this side", "this is Sneha", "boss"), greet her warmly: "Hello boss!"
 
 HOW THE VERDICT IS MADE
 - Two engines run on the image and are fused:
@@ -389,6 +391,20 @@ _INTENTS = [
      "It runs locally on your machine — your image is processed on the backend "
      "you're running and isn't stored or sent anywhere (the only optional "
      "external call is to Claude for the explanation/chat if you set an API key)."),
+
+    # ---- the creator: Sneha Shaw ----
+    (["hey sneha", "sneha this side", "this is sneha", "i am sneha", "im sneha",
+      "i'm sneha", "sneha here", "its sneha", "it's sneha", "sneha speaking", "boss"],
+     "Hello boss! 👋 Welcome back, Sneha — you built all of this. What would you "
+     "like to do? I can explain any feature or walk you through checking a note."),
+
+    (["about sneha", "who is sneha", "tell me about sneha", "her gender",
+      "is sneha a girl", "is she a girl", "is she a boy", "boy or girl",
+      "her hobby", "her hobbies", "what does she like", "what she loves",
+      "sneha like", "favourite", "favorite", "ice cream", "icecream", "sleeping",
+      "about the creator", "about the author"],
+     "Sneha Shaw built this entire project. She's a girl 🙂 who loves ice "
+     "cream 🍦 and sleeping 😴 — and she made the whole counterfeit detector."),
 
     (["who made", "developer", "author", "internship", "creator", "team",
       "project by", "made this", "sneha", "shaw", "who built", "whose project",

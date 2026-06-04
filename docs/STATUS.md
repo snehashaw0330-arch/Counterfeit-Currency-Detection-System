@@ -6,7 +6,40 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-04 (Phases M–P new features shipped: Listen+Hindi, PDF, camera, tamper, Grad-CAM)
+**Last updated:** 2026-06-04 (Phases M–P shipped + chatbot upgrade + Sneha personalization)
+
+## ⏭️ NEXT SESSION — resume here
+
+**Author:** the project is built by **Sneha Shaw** (see [[project_author]] memory).
+The chatbot credits her and has an easter egg: "hey sneha this side" → "Hello
+boss!"; "who is sneha / her gender / what does she like" → "a girl who loves ice
+cream 🍦 and sleeping 😴". Wired in `backend/chatbot.py` (offline intents +
+`_PROJECT_KNOWLEDGE`). **Backend restart needed** for /chat changes to show.
+
+**PENDING (user asked for these next):**
+1. **Voice INPUT to the chatbot** — a mic button in the chat input using the Web
+   Speech API (`webkitSpeechRecognition`/`SpeechRecognition`) to dictate a
+   question (pairs with the existing "Listen"/TTS). Frontend-only, in
+   `ChatAssistant`'s input row; hide/disable gracefully where unsupported
+   (Firefox). Default lang en-IN. Show a "listening" state.
+2. **Big-upgrade roadmap (~3–4 days) — user wants substantial new work.** Propose
+   + let Sneha pick. Strong candidates:
+   - **Robust note localization** (GrabCut / saliency / a small segmentation
+     model) to isolate a note in a cluttered scene — directly fixes the
+     camera ₹100→₹50 misread (root cause = localization, see below).
+   - **Dataset expansion + retrain** (the #1 accuracy lever; data-bound ceiling).
+   - **Region feature overlays** (serial/watermark/thread boxes on the note).
+   - **Batch mode + CSV export**; **session history** (localStorage gallery).
+   - **Serial-duplicate detection** (store seen serials; repeats = fraud tell).
+   - **More languages**, **PWA/installable**, **full voice conversation**,
+     **Dockerize**.
+
+**Camera misread root cause (for the localization work):** a note that's small/
+tilted in a busy, low-light frame isn't isolated by the contour-based
+`_detect_note_quad`, so OCR reads stray digits. Phase-O now crops to the green
+guide box, but true robustness needs real segmentation (item 2a above).
+
+## ✨ New features M–P (user picked all four; built in order, one commit each)
 
 ## ✨ New features M–P (user picked all four; built in order, one commit each)
 
