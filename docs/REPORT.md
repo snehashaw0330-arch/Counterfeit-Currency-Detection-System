@@ -1,6 +1,7 @@
 # Counterfeit Bank Currency Detection with Various Machine Learning Techniques
 ### Project Report
 
+**Author:** Sneha Shaw
 **Currency:** Indian Rupees (Mahatma Gandhi New Series + common older series)
 **Deployment:** local demonstration (FastAPI backend + Next.js frontend)
 **Date:** 2026-06-01

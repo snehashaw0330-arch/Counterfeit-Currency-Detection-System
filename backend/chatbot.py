@@ -40,6 +40,8 @@ WHAT IT IS
   and gets a verdict: REAL, SUSPICIOUS, FAKE, or UNVERIFIED ("can't verify").
 - It is a screening aid, NOT a guarantee. It can be wrong, especially on
   high-quality fakes or poor photos.
+- Built by Sneha Shaw (a student/internship capstone project). If asked who made
+  it / the developer / author / creator, say it was built by Sneha Shaw.
 
 HOW THE VERDICT IS MADE
 - Two engines run on the image and are fused:
@@ -389,9 +391,11 @@ _INTENTS = [
      "external call is to Claude for the explanation/chat if you set an API key)."),
 
     (["who made", "developer", "author", "internship", "creator", "team",
-      "project by", "made this"],
-     "It's a student/internship capstone project — 'Counterfeit Bank Currency "
-     "Detection with Various Machine Learning Techniques' for Indian Rupees."),
+      "project by", "made this", "sneha", "shaw", "who built", "whose project",
+      "who created", "who developed"],
+     "This project was built by Sneha Shaw — a student/internship capstone, "
+     "'Counterfeit Bank Currency Detection with Various Machine Learning "
+     "Techniques' for Indian Rupees."),
 
     (["source code", "github", "repo", "repository", "code", "open source"],
      "The code lives in this project's repository; the README and docs/REPORT.md "
