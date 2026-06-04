@@ -1,0 +1,61 @@
+........................................................................ [ 47%]
+........................................................................ [ 95%]
+.......                                                                  [100%]
+============================== warnings summary ===============================
+venv\Lib\site-packages\easyocr\detection.py:81
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\venv\Lib\site-packages\easyocr\detection.py:81: DeprecationWarning: torch.ao.quantization is deprecated and will be removed in 2.10. 
+  For migrations of users: 
+  1. Eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead 
+  2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) 
+  3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) 
+  see https://github.com/pytorch/ao/issues/2259 for more details
+    torch.quantization.quantize_dynamic(net, dtype=torch.qint8, inplace=True)
+
+venv\Lib\site-packages\torch\ao\quantization\quantize.py:570
+venv\Lib\site-packages\torch\ao\quantization\quantize.py:570
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\venv\Lib\site-packages\torch\ao\quantization\quantize.py:570: DeprecationWarning: torch.ao.quantization is deprecated and will be removed in 2.10. 
+  For migrations of users: 
+  1. Eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead 
+  2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) 
+  3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) 
+  see https://github.com/pytorch/ao/issues/2259 for more details
+    convert(model, mapping, inplace=True)
+
+venv\Lib\site-packages\easyocr\recognition.py:177
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\venv\Lib\site-packages\easyocr\recognition.py:177: DeprecationWarning: torch.ao.quantization is deprecated and will be removed in 2.10. 
+  For migrations of users: 
+  1. Eager mode quantization (torch.ao.quantization.quantize, torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode quantize_ API instead 
+  2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization API instead (prepare_pt2e, convert_pt2e) 
+  3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) 
+  see https://github.com/pytorch/ao/issues/2259 for more details
+    torch.quantization.quantize_dynamic(model, dtype=torch.qint8, inplace=True)
+
+venv\Lib\site-packages\torch\utils\data\dataloader.py:752: 1 warning
+tests/test_api.py: 3 warnings
+tests/test_forensic.py: 4 warnings
+tests/test_phase_a_ocr.py: 5 warnings
+tests/test_phase_e_tactile.py: 1 warning
+tests/test_phase_p_tamper.py: 1 warning
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\venv\Lib\site-packages\torch\utils\data\dataloader.py:752: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
+    super().__init__(loader)
+
+tests/test_api.py::test_home_endpoint
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\backend\main.py:109: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+tests/test_api.py::test_home_endpoint
+  C:\Users\swadh\Desktop\Counterfeit-Currency-Detection-System\venv\Lib\site-packages\fastapi\applications.py:4598: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+151 passed, 21 warnings in 336.91s (0:05:36)
