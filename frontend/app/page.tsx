@@ -2214,41 +2214,80 @@ function CameraModal({
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const aliveRef = useRef(true);
+
+  // phase: idle (need a click) → starting → live, or error
+  const [phase, setPhase] = useState<"idle" | "starting" | "live" | "error">("idle");
   const [error, setError] = useState<string>("");
-  const [ready, setReady] = useState(false);
 
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  };
+
+  // Only cleanup on unmount — the camera is started by a user click (not on
+  // mount), which avoids the React-StrictMode double-invoke that re-opens the
+  // device too fast and trips a NotReadableError.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          setError("This browser doesn't expose a camera API.");
-          return;
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-          audio: false,
-        });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-        setReady(true);
-      } catch {
-        setError("Couldn't access the camera. Check the browser permission.");
-      }
-    })();
-
+    aliveRef.current = true;
     return () => {
-      cancelled = true;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      aliveRef.current = false;
+      stopStream();
     };
   }, []);
+
+  const start = async () => {
+    setPhase("starting");
+    setError("");
+    stopStream();
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw Object.assign(new Error("no api"), { name: "NotSupported" });
+      }
+      // All "ideal" → soft preferences, so this never over-constrains and
+      // falls back to whatever camera exists (front cam on a laptop).
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      if (!aliveRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setPhase("live");
+    } catch (e) {
+      const name = (e as { name?: string })?.name ?? "";
+      let msg: string;
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        msg =
+          "Camera permission is blocked. Click the camera/🔒 icon at the left " +
+          "of the address bar → set Camera to Allow → then press Try again.";
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        msg = "No camera was found on this device.";
+      } else if (name === "NotReadableError" || name === "TrackStartError") {
+        msg =
+          "The camera is already in use by another app or browser tab. Close " +
+          "it (Zoom/Meet/another tab) and press Try again.";
+      } else if (name === "NotSupported") {
+        msg = "This browser doesn't expose a camera API (needs https or localhost).";
+      } else {
+        msg = `Couldn't start the camera (${name || "unknown error"}). Press Try again.`;
+      }
+      if (aliveRef.current) {
+        setError(msg);
+        setPhase("error");
+      }
+    }
+  };
 
   const capture = () => {
     const video = videoRef.current;
@@ -2262,6 +2301,7 @@ function CameraModal({
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
+        stopStream();
         onCapture(new File([blob], "camera-capture.jpg", { type: "image/jpeg" }));
       },
       "image/jpeg",
@@ -2286,19 +2326,60 @@ function CameraModal({
           </button>
         </div>
 
-        {error ? (
-          <p className="text-sm text-red-400 py-10 text-center">{error}</p>
-        ) : (
+        {/* ---- IDLE: ask permission on a click (Google-Meet style) ---- */}
+        {phase === "idle" && (
+          <div className="flex flex-col items-center text-center py-8">
+            <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/30 mb-4">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+            </span>
+            <p className="text-sm text-gray-400 max-w-sm mb-5">
+              We&apos;ll ask your browser for camera access. Choose
+              <span className="text-emerald-300 font-medium"> Allow</span> when prompted.
+            </p>
+            <button
+              onClick={start}
+              className="inline-flex items-center justify-center gap-2 rounded-xl py-3 px-6 text-sm font-semibold text-white bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 transition-all"
+            >
+              Enable camera
+            </button>
+          </div>
+        )}
+
+        {/* ---- ERROR: message + retry ---- */}
+        {phase === "error" && (
+          <div className="flex flex-col items-center text-center py-8">
+            <p className="text-sm text-red-400 max-w-md mb-5">{error}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                className="rounded-xl border border-white/15 bg-white/5 py-2.5 px-5 text-sm font-semibold text-gray-200 hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={start}
+                className="rounded-xl py-2.5 px-6 text-sm font-semibold text-white bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 transition-all"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ---- STARTING / LIVE ---- */}
+        {(phase === "starting" || phase === "live") && (
           <>
             <div className="relative overflow-hidden rounded-2xl bg-black ring-1 ring-white/10">
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <video ref={videoRef} playsInline muted className="w-full h-auto block" />
-              {!ready && (
+              <video ref={videoRef} playsInline muted autoPlay className="w-full h-auto block" />
+              {phase === "starting" && (
                 <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
                   Starting camera…
                 </div>
               )}
-              {/* framing guide */}
               <div className="pointer-events-none absolute inset-6 rounded-xl border-2 border-dashed border-emerald-400/50" />
             </div>
 
@@ -2315,7 +2396,7 @@ function CameraModal({
               </button>
               <button
                 onClick={capture}
-                disabled={!ready}
+                disabled={phase !== "live"}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40 transition-all"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
