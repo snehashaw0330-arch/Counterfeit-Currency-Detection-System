@@ -40,6 +40,31 @@ def test_faq_intents(q, needle):
     assert needle.lower() in out["reply"].lower()
 
 
+@pytest.mark.parametrize("greeting", ["hi", "hello there", "hey!", "namaste", "good morning"])
+def test_greetings(greeting):
+    out = cb.answer(greeting)
+    assert out["source"] == "template"
+    # Greeting reply is warm and offers help.
+    assert any(w in out["reply"].lower() for w in ("hi", "help", "assistant"))
+
+
+@pytest.mark.parametrize("q,needle", [
+    ("thank you so much", "welcome"),
+    ("who are you", "assistant"),
+    ("what can you do", "explain"),
+    ("what is the ai heatmap", "grad-cam"),
+    ("can it work offline", "offline"),
+    ("how do i download a pdf report", "pdf"),
+    ("tell me about hindi", "हिंदी"),
+    ("how do i use the camera", "camera"),
+    ("what is digital tamper / ela", "ela"),
+])
+def test_conversational_and_feature_intents(q, needle):
+    out = cb.answer(q)
+    assert out["source"] == "template"
+    assert needle.lower() in out["reply"].lower()
+
+
 def test_empty_question_returns_help_menu():
     out = cb.answer("")
     assert "help assistant" in out["reply"].lower()

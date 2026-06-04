@@ -2048,17 +2048,54 @@ const CHAT_SUGGESTIONS = [
   "How accurate is it?",
 ];
 
+const CHAT_STORE_KEY = "anc_chat_v1";
+
 function ChatAssistant() {
 
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([CHAT_GREETING]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Restore the conversation on mount so it survives closing the panel AND a
+  // page refresh.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(CHAT_STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) setMessages(parsed);
+      }
+    } catch {
+      /* ignore corrupt storage */
+    }
+    setLoaded(true);
+  }, []);
+
+  // Persist after the initial load (so we don't overwrite with the default).
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(CHAT_STORE_KEY, JSON.stringify(messages.slice(-40)));
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [messages, loaded]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, open]);
+
+  const clearChat = () => {
+    setMessages([CHAT_GREETING]);
+    try {
+      localStorage.removeItem(CHAT_STORE_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const send = async (text?: string) => {
     const message = (text ?? input).trim();
@@ -2136,10 +2173,23 @@ function ChatAssistant() {
                 <path d="M2 14h2M20 14h2M15 13v2M9 13v2" />
               </svg>
             </span>
-            <div>
+            <div className="flex-1">
               <p className="font-semibold text-sm leading-tight">Help Assistant</p>
               <p className="text-xs text-gray-400">How it works · how to run it</p>
             </div>
+            {messages.length > 1 && (
+              <button
+                onClick={clearChat}
+                aria-label="Clear chat"
+                title="Clear chat"
+                className="rounded-lg p-1.5 text-gray-400 hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            )}
           </div>
 
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
