@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 import platform
-from collections import Counter
+from collections import Counter, OrderedDict
 
 import cv2
 import numpy as np
@@ -194,6 +194,24 @@ _BANKNOTE_ASPECT = 2.2  # Indian notes are roughly 2.2:1
 _BANKNOTE_ASPECT_LO = 1.6
 _BANKNOTE_ASPECT_HI = 3.2
 
+# --- Robust localization fallback (segmentation) -------------------------
+# The edge/contour detector fails on cluttered or low-light scenes where the
+# note doesn't form a clean 4-gon (the camera ₹100→₹50 misread root cause).
+# When it returns nothing, fall back to a GrabCut foreground segmentation
+# seeded by spectral-residual saliency + a central prior. Dependency-free
+# (cv2.grabCut is in core OpenCV; no opencv-contrib needed).
+_SEG_WORK_LONG_EDGE = 480   # GrabCut is O(pixels)/iter — bound the work size
+_SEG_GC_ITERS = 5
+_SEG_MIN_AREA_FRAC = 0.12   # the note blob must fill ≥12% of the frame
+_SEG_MAX_AREA_FRAC = 0.985  # …and not be the whole frame (no note to isolate)
+_SEG_FILL_FRAC = 0.62       # blob must fill ≥62% of its rotated bounding box
+
+# Content-keyed memo so the ~5 _detect_note_quad calls per /predict (pipeline,
+# proportions, readability×2, region overlay) on the SAME frame don't each
+# re-run GrabCut. Keyed by a 24×24 thumbnail's bytes; tiny, bounded LRU.
+_QUAD_CACHE: "OrderedDict[bytes, dict | None]" = OrderedDict()
+_QUAD_CACHE_MAX = 6
+
 
 # Canonical RBI banknote dimensions (mm) for the Mahatma
 # Gandhi New Series. Source: RBI banknote specifications.
@@ -259,15 +277,53 @@ def note_region(image):
 
 
 def _detect_note_quad(image):
-    """Find the largest banknote-shaped 4-sided contour in the
-    image. Returns a dict with `quad` (4×2 ordered TL/TR/BR/BL),
-    `aspect` (long/short edge ratio), `avg_w`, `avg_h`, or
-    None if no plausible quad is found.
+    """Find the banknote quad in the image. Returns a dict with `quad`
+    (4×2 ordered TL/TR/BR/BL), `aspect` (long/short edge ratio), `avg_w`,
+    `avg_h`, or None if no plausible note is found.
 
-    Pure detection — does not warp. Used by both `_locate_note`
-    (which then applies the perspective transform) and
-    `analyze_proportions` (which compares aspect to the canonical
-    RBI dimensions for the OCR'd denomination)."""
+    Two-stage, fast-path first:
+      1. `_detect_note_quad_edges` — Canny/contour + rotated-rect. Handles
+         clean, well-lit notes on a plain background (the common case).
+      2. `_segment_note_quad` — GrabCut foreground segmentation seeded by
+         saliency, used only when (1) finds nothing. Recovers notes in
+         cluttered / low-light frames that don't form a clean edge quad.
+
+    Result is memoized by frame content (24×24 thumbnail) so the several
+    callers per /predict — `_locate_note`, `analyze_proportions`,
+    `assess_readability`, `note_region` — don't each re-run the heavy
+    segmentation path on the same image. Never raises."""
+
+    try:
+        img = _ensure_bgr(image)
+        if img.size == 0:
+            return None
+        thumb = cv2.resize(img, (24, 24), interpolation=cv2.INTER_AREA)
+        key = thumb.tobytes()
+        if key in _QUAD_CACHE:
+            _QUAD_CACHE.move_to_end(key)
+            return _QUAD_CACHE[key]
+
+        result = _detect_note_quad_edges(img)
+        if result is None:
+            result = _segment_note_quad(img)
+
+        _QUAD_CACHE[key] = result
+        _QUAD_CACHE.move_to_end(key)
+        while len(_QUAD_CACHE) > _QUAD_CACHE_MAX:
+            _QUAD_CACHE.popitem(last=False)
+        return result
+    except Exception:
+        return None
+
+
+def _detect_note_quad_edges(image):
+    """Edge/contour note detector: the largest banknote-shaped 4-sided
+    contour, falling back to the largest in-range rotated rectangle.
+    Returns the standard quad dict or None.
+
+    Pure detection — does not warp. Fast path of `_detect_note_quad`;
+    handles clean notes on a plain background. Cluttered / low-light
+    frames fall through to `_segment_note_quad`."""
 
     try:
         img = _ensure_bgr(image)
@@ -381,6 +437,160 @@ def _detect_note_quad(image):
             # L-shaped background blob does not).
             if area < (avg_w * avg_h) * 0.70:
                 continue
+
+            return {
+                "quad": quad,
+                "aspect": aspect,
+                "avg_w": avg_w,
+                "avg_h": avg_h,
+            }
+
+        return None
+
+    except Exception:
+        return None
+
+
+def _spectral_residual_saliency(bgr):
+    """Spectral-residual saliency map (Hou & Zhang, CVPR 2007), implemented
+    with numpy FFT so it needs no opencv-contrib. Returns a float32 map in
+    [0,1] the same H×W as `bgr`, where high values mark visually-distinctive
+    regions (a printed banknote against a plainer desk/hand). Used only as a
+    GrabCut foreground seed, so approximate is fine. Never raises."""
+
+    try:
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        h, w = gray.shape
+        # Saliency is scale-tolerant — compute on a small fixed grid for speed
+        # and numerical stability, then resize the response back up.
+        proc = cv2.resize(gray, (64, 64), interpolation=cv2.INTER_AREA)
+
+        f = np.fft.fft2(proc)
+        log_amp = np.log(np.abs(f) + 1e-8)
+        phase = np.angle(f)
+        spectral_residual = log_amp - cv2.blur(log_amp, (3, 3))
+
+        recon = np.fft.ifft2(np.exp(spectral_residual + 1j * phase))
+        sal = np.abs(recon) ** 2
+        sal = cv2.GaussianBlur(sal, (9, 9), 2.5)
+
+        sal = cv2.resize(sal, (w, h), interpolation=cv2.INTER_LINEAR)
+        sal -= sal.min()
+        peak = sal.max()
+        if peak > 0:
+            sal /= peak
+        return sal.astype(np.float32)
+    except Exception:
+        return np.zeros(bgr.shape[:2], dtype=np.float32)
+
+
+def _segment_note_quad(image):
+    """Segmentation fallback for cluttered / low-light frames that the
+    edge detector can't resolve into a clean quad. Runs GrabCut seeded by
+    spectral-residual saliency plus a central prior (notes are framed near
+    the middle), fits a minimum-area rectangle to the largest banknote-
+    aspect foreground blob, and returns the standard quad dict (in ORIGINAL
+    image coordinates) or None.
+
+    The aspect + fill gates keep this from locking onto an arbitrary salient
+    background object: a non-banknote blob just yields None and we fall
+    through to the unchanged image, exactly as before. Never raises."""
+
+    try:
+        img = _ensure_bgr(image)
+        h, w = img.shape[:2]
+        img_area = h * w
+        if img_area < 10_000:
+            return None
+
+        # Bound the working resolution — GrabCut cost scales with pixels.
+        scale = min(1.0, _SEG_WORK_LONG_EDGE / float(max(h, w)))
+        sw = max(1, int(round(w * scale)))
+        sh = max(1, int(round(h * scale)))
+        small = cv2.resize(img, (sw, sh), interpolation=cv2.INTER_AREA)
+        small_area = sh * sw
+
+        # Build the GrabCut seed mask.
+        sal = _spectral_residual_saliency(small)
+        gc = np.full((sh, sw), cv2.GC_PR_BGD, dtype=np.uint8)
+
+        # Promote salient interior pixels to probable-foreground.
+        thr = float(sal.mean() + sal.std())
+        gc[sal >= thr] = cv2.GC_PR_FGD
+
+        # Always seed a central probable-foreground box too — a low-contrast
+        # note can be barely salient, and GrabCut needs a foreground seed or
+        # it raises. The colour model then grows it to the true note edges.
+        cy0, cy1 = int(sh * 0.32), int(sh * 0.68)
+        cx0, cx1 = int(sw * 0.22), int(sw * 0.78)
+        gc[cy0:cy1, cx0:cx1] = cv2.GC_PR_FGD
+
+        # Hard-background frame (outer ~4%) — the note is virtually never
+        # flush against the photo border, and this anchors the bg colour model.
+        b = max(2, int(round(min(sh, sw) * 0.04)))
+        gc[:b, :] = cv2.GC_BGD
+        gc[-b:, :] = cv2.GC_BGD
+        gc[:, :b] = cv2.GC_BGD
+        gc[:, -b:] = cv2.GC_BGD
+
+        bgd_model = np.zeros((1, 65), np.float64)
+        fgd_model = np.zeros((1, 65), np.float64)
+        cv2.grabCut(
+            small, gc, None, bgd_model, fgd_model,
+            _SEG_GC_ITERS, cv2.GC_INIT_WITH_MASK,
+        )
+
+        fg = np.where(
+            (gc == cv2.GC_FGD) | (gc == cv2.GC_PR_FGD), 255, 0
+        ).astype(np.uint8)
+
+        # Consolidate: close interior gaps (security thread, light text on a
+        # dark note), then drop speckle.
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE, k, iterations=2)
+        fg = cv2.morphologyEx(fg, cv2.MORPH_OPEN, k, iterations=1)
+
+        contours, _ = cv2.findContours(
+            fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        if not contours:
+            return None
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        inv = 1.0 / scale
+        for contour in contours[:4]:
+            area = cv2.contourArea(contour)
+            if area < small_area * _SEG_MIN_AREA_FRAC:
+                break
+            if area > small_area * _SEG_MAX_AREA_FRAC:
+                continue
+
+            rect = cv2.minAreaRect(contour)
+            (rw, rh) = rect[1]
+            if rw < 1 or rh < 1:
+                continue
+            # The blob must actually FILL its rotated bbox — a real note does;
+            # an L-shaped shadow / multi-object blob does not.
+            if area < (rw * rh) * _SEG_FILL_FRAC:
+                continue
+
+            long_edge = max(rw, rh)
+            short_edge = min(rw, rh)
+            aspect = long_edge / short_edge
+            if aspect < _BANKNOTE_ASPECT_LO or aspect > _BANKNOTE_ASPECT_HI:
+                continue
+
+            # Scale the corners back to the original resolution.
+            quad = _order_quad(cv2.boxPoints(rect) * inv)
+            tl, tr, br, bl = quad
+            avg_w = (
+                float(np.linalg.norm(tr - tl))
+                + float(np.linalg.norm(br - bl))
+            ) / 2.0
+            avg_h = (
+                float(np.linalg.norm(bl - tl))
+                + float(np.linalg.norm(br - tr))
+            ) / 2.0
 
             return {
                 "quad": quad,

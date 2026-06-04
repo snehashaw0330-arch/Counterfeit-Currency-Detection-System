@@ -6,7 +6,7 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-04 (Phases M–P shipped + chatbot upgrade + Sneha personalization)
+**Last updated:** 2026-06-04 (chatbot voice input + Track-A item 1 robust localization shipped)
 
 ## ⏭️ NEXT SESSION — resume here
 
@@ -16,23 +16,48 @@ boss!"; "who is sneha / her gender / what does she like" → "a girl who loves i
 cream 🍦 and sleeping 😴". Wired in `backend/chatbot.py` (offline intents +
 `_PROJECT_KNOWLEDGE`). **Backend restart needed** for /chat changes to show.
 
-**PENDING (user asked for these next):**
-1. **Voice INPUT to the chatbot** — a mic button in the chat input using the Web
-   Speech API (`webkitSpeechRecognition`/`SpeechRecognition`) to dictate a
-   question (pairs with the existing "Listen"/TTS). Frontend-only, in
-   `ChatAssistant`'s input row; hide/disable gracefully where unsupported
-   (Firefox). Default lang en-IN. Show a "listening" state.
-2. **Big-upgrade roadmap (~3–4 days) — user wants substantial new work.** Propose
-   + let Sneha pick. Strong candidates:
-   - **Robust note localization** (GrabCut / saliency / a small segmentation
-     model) to isolate a note in a cluttered scene — directly fixes the
-     camera ₹100→₹50 misread (root cause = localization, see below).
-   - **Dataset expansion + retrain** (the #1 accuracy lever; data-bound ceiling).
-   - **Region feature overlays** (serial/watermark/thread boxes on the note).
-   - **Batch mode + CSV export**; **session history** (localStorage gallery).
-   - **Serial-duplicate detection** (store seen serials; repeats = fraud tell).
-   - **More languages**, **PWA/installable**, **full voice conversation**,
-     **Dockerize**.
+**Sneha picked the big-upgrade roadmap = Track A (Accuracy & Robustness):**
+robust note localization (item 1) + dataset expansion & CNN retrain (item 2).
+
+**DONE this session (uncommitted — one commit each pending user OK):**
+1. **Chatbot voice INPUT — DONE.** Mic button in `ChatAssistant`'s input row
+   (`frontend/app/page.tsx`) using Web Speech API
+   (`SpeechRecognition`/`webkitSpeechRecognition`). Feature-detected client-side
+   (hidden on Firefox), default lang **en-IN**, `interimResults` fill the box
+   live + append to typed text, red pulsing "Listening…" state, mic released on
+   send/unmount. Minimal local TS typings (no `any`). tsc + next build clean.
+2. **Track A item 1 — Robust note localization — DONE.** `_detect_note_quad` is
+   now a 2-stage orchestrator in `backend/forensic.py`: (a) `_detect_note_quad_edges`
+   (the original Canny/contour + rotated-rect, byte-for-byte unchanged), then
+   (b) `_segment_note_quad` — GrabCut foreground segmentation seeded by
+   `_spectral_residual_saliency` (FFT, no opencv-contrib) + a central prior,
+   used ONLY when the edge path returns None. Strictly additive. Result memoized
+   by a 24×24-thumbnail key (`_QUAD_CACHE`, LRU≤6) so the ~5 detect calls/predict
+   don't each re-run GrabCut. All consumers (`_locate_note`, `note_region`,
+   `analyze_proportions`, `assess_readability`) benefit for free.
+   **Validated:** `tests/test_phase_q_localization.py` (7 tests) green; localization-
+   only pass over 36 real samples → **0 regressions** (all 14 edge-located still
+   located) + **5 new correct recoveries** (handheld phone ₹500, phone ₹50,
+   specimen ₹50, ₹20, a multi-note ₹100 composite — visually confirmed each crop
+   is the actual note). Garbage-safe (None on blank/white/noise).
+
+**PENDING — Track A item 2 (Dataset expansion + CNN retrain). BLOCKED on user:**
+- **(a) Data fetch (the real accuracy lever):** `dataset/` is git-ignored and
+  currently only **65 labelled imgs (42 genuine / 23 fake, mostly ₹500/₹2000)**.
+  Retraining on 65 won't move the ceiling — it's data-bound. Sneha must download
+  the Kaggle/Mendeley sets (login + ToS; an agent can't) per `docs/DATASET.md`
+  §3, drop them under `dataset/real|fake/`, then re-run `build_dataset.py`.
+- **(b) Heavy-compute window:** retrain/benchmark/calibrate are CPU-heavy passes
+  — do NOT run while the local app is open (backend-starvation lesson,
+  [[no-heavy-bg-jobs-during-use]]). Run when the app is idle.
+- Pipeline is data-driven & already built: `scripts/build_dataset.py --validate`
+  → `scripts/train_cnn.py` (MobileNetV2 head → `..._v2.keras`, only adopt if test
+  macro-F1 beats current 0.564) → `scripts/benchmark_models.py` →
+  `scripts/calibrate_thresholds.py`. No code changes needed to ingest more data.
+
+**Other strong roadmap candidates (not picked this round):** region feature
+overlays, batch mode + CSV export, session history gallery, serial-duplicate
+detection, more languages, PWA/installable, full voice conversation, Dockerize.
 
 **Camera misread root cause (for the localization work):** a note that's small/
 tilted in a busy, low-light frame isn't isolated by the contour-based
