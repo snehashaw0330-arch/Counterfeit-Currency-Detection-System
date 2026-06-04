@@ -136,6 +136,14 @@ The system is built to be *trustworthy and usable*, not just a classifier:
 - **Help chatbot** (`/chat`). A built-in assistant that explains how the system
   works and how to run it; Claude-backed with an offline keyword-FAQ fallback,
   and it refuses any request to make or pass counterfeit money.
+- **Accessibility — Listen + Hindi.** A Web-Speech "Listen" button reads the
+  result aloud, and an English/Hindi toggle localises the verdict and the AI
+  explanation — serving the visually-impaired and bilingual use cases the
+  reference papers cite.
+- **Downloadable PDF report**, **live camera capture**, and a **Grad-CAM
+  attention heatmap** (where the CNN looked) round out the product surface.
+- **Digital-tamper (ELA) check** adds an image-forgery dimension distinct from
+  physical counterfeiting (INFO-only — a heuristic, never a verdict driver).
 
 Every Claude-backed feature degrades to a deterministic fallback, so the whole
 product runs in a local demo with no API key or internet.

@@ -6,7 +6,26 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-03 (Phases L, E, G.3, UI makeover, F.2 done; wrapping up)
+**Last updated:** 2026-06-04 (Phases M–P new features shipped: Listen+Hindi, PDF, camera, tamper, Grad-CAM)
+
+## ✨ New features M–P (user picked all four; built in order, one commit each)
+
+- **M — Accessibility: Listen + Hindi (4383b24).** Language toggle (EN/हिंदी);
+  `genai.explain(result, lang)` full Hindi template + Hindi Claude path; Hindi
+  verdict headlines; Web-Speech "Listen" buttons (verdict banner + explanation)
+  reading aloud in the chosen language. Tests +4.
+- **N — Downloadable PDF report (9767293).** "Download report (PDF)" opens a
+  self-contained print-ready doc (verdict, denom, confidence, serial, the note
+  image, full findings table, disclaimer) → browser Save-as-PDF. No new deps.
+- **O — Live camera capture (11bb3c2).** "Use camera" → `CameraModal`
+  (getUserMedia rear cam, framing guide) captures a frame → same /predict flow.
+- **P.1 — Digital-tamper / ELA (1c8a2dc).** `analyze_tamper_ela` on the ORIGINAL
+  image; INFO-only (heuristic, never drives the verdict). Pipeline now 15 checks.
+- **P.2 — Grad-CAM heatmap (285f3d2).** `backend/gradcam.py` (best-effort, finds
+  Conv_1 7×7×1280, None on failure); `/predict` returns a `heatmap` RGBA PNG data
+  URL; frontend "Show AI heatmap" overlay. Verified end-to-end on a real ₹100.
+
+All: tsc + next build clean; new phase tests green.
 
 ## 🚧 Full-roadmap build (user mandate: "complete everything, no loose ends, demo-perfect")
 

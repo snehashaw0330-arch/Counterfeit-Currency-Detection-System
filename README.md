@@ -67,6 +67,13 @@ retake"** instead of a misleading REAL.
   guilloché (anti-copy) art from a seed; abstract art, not currency.
 - **Help chatbot** (`/chat`) — a floating assistant that answers "how does it
   work / how do I run it / what does this verdict mean".
+- **Listen + Hindi** — a "Listen" button reads the result aloud (Web Speech) and
+  an English/हिंदी toggle localises the verdict and explanation (accessibility).
+- **Downloadable PDF report** — a print-ready one-page verdict report.
+- **Live camera capture** — analyse a note straight from the webcam/phone camera.
+- **AI heatmap (Grad-CAM)** — overlay showing where the CNN looked.
+- **Digital-tamper check (ELA)** — flags possible digitally edited/spliced images
+  (informational; distinct from physical counterfeits).
 
 ## Quick start
 
