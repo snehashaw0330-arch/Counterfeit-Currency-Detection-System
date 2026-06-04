@@ -335,6 +335,17 @@ export default function Home() {
     acceptFile(e.dataTransfer.files?.[0]);
   };
 
+  const clearSelection = () => {
+    if (preview) URL.revokeObjectURL(preview);
+    setSelectedImage(null);
+    setPreview("");
+    setResult(null);
+    setShowHeatmap(false);
+    stopSpeaking();
+    const input = document.getElementById("note-file") as HTMLInputElement | null;
+    if (input) input.value = "";  // allow re-selecting the same file
+  };
+
   // Phase N — open a print-ready report in a new window (Save as PDF).
   const downloadReport = () => {
     if (!result) return;
@@ -603,7 +614,7 @@ export default function Home() {
             {result?.heatmap && (
               <button
                 onClick={() => setShowHeatmap((s) => !s)}
-                className={`absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg shadow-lg transition-colors ${
+                className={`absolute bottom-3 right-3 inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg shadow-lg transition-colors ${
                   showHeatmap
                     ? "bg-fuchsia-500 text-white"
                     : "bg-black/70 text-gray-200 hover:bg-black/90"
@@ -616,6 +627,18 @@ export default function Home() {
                 {showHeatmap ? "Hide AI heatmap" : "Show AI heatmap"}
               </button>
             )}
+
+            {/* Remove / clear the selected image */}
+            <button
+              onClick={clearSelection}
+              aria-label="Remove image"
+              className="absolute top-3 right-3 inline-flex items-center gap-1.5 text-xs font-semibold bg-black/70 text-gray-200 hover:bg-red-500 hover:text-white px-2.5 py-1 rounded-lg shadow-lg transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+              Remove
+            </button>
 
           </div>
         )}
