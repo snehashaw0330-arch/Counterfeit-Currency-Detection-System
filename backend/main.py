@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, Body, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 import importlib
 
@@ -25,7 +26,7 @@ from backend.forensic import (
     assess_readability,
     note_region,
 )
-from backend.classical import predict_classical, warmup_classical
+from backend.classical import predict_classical, warmup_classical, classical_status
 from backend.genai import explain as genai_explain, llm_available
 from backend.security_pattern import pattern_png, secure_note_png
 from backend.secure_note import verify_secure_note
@@ -104,8 +105,11 @@ def _background_warmup():
     except Exception as exc:
         print(f"OCR Warmup raised (non-fatal): {exc}")
     try:
-        clf = warmup_classical()
-        print(f"Classical model: {'loaded' if clf else 'not trained yet (run scripts/train_classical.py)'}")
+        warmup_classical()
+        # classical_status() returns "loaded" or the concrete reason it
+        # couldn't (missing binary, stale metrics.json, load error) so a
+        # "Not trained" UI is always traceable from the backend log.
+        print(f"Classical model: {classical_status()}")
     except Exception as exc:
         print(f"Classical warmup raised (non-fatal): {exc}")
 
@@ -342,7 +346,12 @@ async def predict_currency(file: UploadFile = File(...)):
 
     try:
         rgb_array, bgr_image = _decode_upload(await file.read())
-        return _analyze(rgb_array, bgr_image)
+        # _analyze is heavy, synchronous CPU work (TensorFlow inference,
+        # OpenCV, EasyOCR). Running it directly in this async endpoint would
+        # block the single event-loop thread for the whole inference, freezing
+        # EVERY other request — including /docs and /openapi.json — until it
+        # returns. Offload to the threadpool so the loop stays responsive.
+        return await run_in_threadpool(_analyze, rgb_array, bgr_image)
 
     except ValueError as ve:
         # Expected, user-facing validation problems.
@@ -366,8 +375,9 @@ async def diagnose_currency(file: UploadFile = File(...)):
 
     try:
         rgb_array, bgr_image = _decode_upload(await file.read())
-        result = _analyze(rgb_array, bgr_image)
-        result["diagnostics"] = diagnostics(bgr_image)
+        # Same reasoning as /predict: keep the blocking pipeline off the loop.
+        result = await run_in_threadpool(_analyze, rgb_array, bgr_image)
+        result["diagnostics"] = await run_in_threadpool(diagnostics, bgr_image)
         return result
 
     except ValueError as ve:
