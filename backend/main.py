@@ -272,6 +272,20 @@ def _analyze(rgb_array, bgr_image):
 
     final_confidence = round(max(combined_score, 1 - combined_score) * 100, 2)
 
+    # ---- foreign-currency routing (Phase S.3) — additive; INR path unchanged --
+    # Only run the (heavy) country detector when the INR-tuned pipeline did NOT
+    # identify an Indian note, so confidently-classified INR notes pay zero extra
+    # cost. A confidently-detected foreign note is marked UNVERIFIED so an
+    # INR-tuned gate never mislabels it FAKE (we have no foreign counterfeit model).
+    inr_identified = (
+        bool(readability.get("denomination_read")) or readability["level"] == "full"
+    )
+    country_detection, foreign_notice, polymer_features = route_foreign(
+        bgr_image, inr_identified
+    )
+    if foreign_notice:
+        final_verdict = "UNVERIFIED"
+
     # ---- detected regions (for the frontend overlay) — Phase G.3 ----
     # Normalised [0,1] polygon of the located note in the ORIGINAL image's
     # coordinates, so the UI can draw "detected note here" over the upload.
@@ -313,6 +327,9 @@ def _analyze(rgb_array, bgr_image):
         "forensic_total_checks": total,
         "ml_models": ml_models,
         "forensic_analysis": forensic_analysis,
+        "country_detection": country_detection,
+        "foreign_notice": foreign_notice,
+        "polymer_features": polymer_features,
     }
 
 
@@ -459,6 +476,28 @@ async def secure_note_verify(
     try:
         _, bgr = _decode_upload(await file.read())
         return verify_secure_note(bgr, serial=serial)
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+    except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}
+
+
+# =====================================================
+# COUNTRY / CURRENCY DETECTION + POLYMER CUES — Phase S.2
+# =====================================================
+
+@app.post("/detect-country")
+async def detect_country_endpoint(file: UploadFile = File(...)):
+    """Phase S.2 — detect the issuing country/currency of a banknote photo and
+    run polymer-substrate cue checks. Foreign-note support is detection + polymer
+    cues only; counterfeit verification remains tuned for INR (see /predict)."""
+    try:
+        _, bgr = _decode_upload(await file.read())
+        return {
+            "country_detection": detect_country(bgr),
+            "polymer_features": analyze_polymer_features(bgr),
+        }
     except ValueError as ve:
         return {"status": "error", "message": str(ve)}
     except Exception as e:
