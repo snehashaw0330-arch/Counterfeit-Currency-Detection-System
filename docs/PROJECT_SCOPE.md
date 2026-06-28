@@ -293,12 +293,103 @@ section. Lands as `docs/REPORT.md` + figures.
 
 ---
 
+### Phase R — Self-authenticating note scheme (closed-loop proof-of-concept)
+
+**Goal.** Demonstrate a *proposed* self-authenticating banknote/token: a serial
+number deterministically generates a guilloché pattern and binds a digital-PUF
+fingerprint; verification re-derives and matches both. This is an **honest
+proof-of-concept of a future-note design — NOT a check against today's real
+notes**, which carry neither a serial-derived guilloché nor an enrolled
+fingerprint. Builds directly on Phase J's `backend/security_pattern.py`.
+
+- **R.1 Serial→guilloché binding.** Serial string seeds the deterministic
+  generator (already supported); compose a "secure-note token" (guilloché +
+  serial + machine-readable micro-text). `GET /secure-note/generate` (idempotent
+  generator, matching the existing `GET /security-pattern`).
+- **R.2 Guilloché verification (closed-loop).** Upload a generated token →
+  locate/normalise the disc → OCR the serial → regenerate the expected pattern
+  → similarity score (SSIM / phase-correlation) → MATCH / MISMATCH.
+- **R.3 Digital PUF.** Registry-backed enroll → verify: a robust texture
+  fingerprint (Gabor/LBP perceptual hash) with error-correction tolerance,
+  stored in a local registry. `POST /puf/enroll`, `POST /puf/verify`.
+- **R.4 Frontend `SecureNoteStudio`** (generate → upload back → guilloché score
+  + PUF match → AUTHENTIC / TAMPERED), clearly labelled a scheme demo, separate
+  from the real-note detector.
+- **R.5 Tests + docs.**
+
+**Acceptance (R):** generate → render → verify round-trips as MATCH; tampered
+pattern / wrong serial → MISMATCH; PUF enroll-then-verify matches the same
+sample and rejects a different one; never raises; new endpoints + frontend
+panel; existing tests + diagnostic harness show **no regression**. Honest
+framing in the UI and report (this is a scheme demo, not real-note verification).
+
+### Phase S — Multi-currency / polymer detection
+
+**Goal.** Extend beyond INR to multi-country detection with country-aware
+routing and polymer-specific checks, benchmarked honestly per currency. This
+**reverses the former "Indian Rupees only" non-goal** (see §5, amended).
+
+- **S.0 Scope amendment** (this section) + locked dataset layout + two-agent
+  ownership (below).
+- **S.1 Country-aware dataset + loader.** Layout
+  `dataset/foreign/<ccy>/{full_note,security_crops}/{real,fake}` + per-image
+  metadata (country, currency, substrate, denomination, side, label, source).
+  The loader keeps `security_crops` OUT of the whole-note geometric pipeline
+  and produces per-currency, group-aware splits (no pooling with the INR
+  classifier).
+- **S.2 Country/currency detection.** `backend/country.py`
+  `detect_country(bgr) -> {country, currency, confidence, method}` via OCR text
+  cues (issuer/script) + palette/aspect, with an explicit `unknown` fallback
+  and **BDT coverage**. BankNote-Net is kept as an **offline benchmark only**
+  (embeddings-only; running it on uploads needs Microsoft's encoder, which we
+  do not ship — so it is not on the live path unless that encoder is wired).
+- **S.3 Country-gated pipeline.** India-specific checks (Gandhi face, RBI bleed
+  lines, ₹ proportions) gated behind `country == IN`; per-currency spec table.
+- **S.4 Polymer checks.** `backend/polymer.py` transparent-window + substrate-
+  sheen, honest PASS/INFO; built + tested on **genuine** polymer fixtures.
+- **S.5 Multi-currency fusion** behind the country gate; contract-stable.
+- **S.6 Eval** per currency (INR + BDT counterfeit; foreign currency-ID), with
+  honest per-country confusion matrices.
+
+**Acceptance (S):** country detection validated on OUR images (INR + BDT +
+genuine AUD/CAD) with `unknown` handling; polymer checks have PASS/INFO tests +
+genuine fixtures; the **INR verdict path is unchanged (no regression)**; the
+per-currency benchmark regenerates from a script. Polymer-*counterfeit*
+benchmarking is honestly limited to INR + BDT — there is no public polymer
+counterfeit dataset (see [DATASET.md](DATASET.md)).
+
+### Parallel execution — two-agent file ownership
+
+This effort runs as two agents in parallel. To prevent collisions, **exactly one
+agent edits each shared file**:
+
+- **Agent C (foreign / data):** NEW modules only — `backend/country.py`,
+  `backend/polymer.py`, `scripts/fetch_banknote_net.py`,
+  `scripts/train_banknote_net_currency.py`, the per-currency benchmark script;
+  everything under `dataset/foreign/**`; foreign docs
+  (`FOREIGN_CURRENCY_EXPANSION.md`, `BANKNOTE_NET.md`). Delivers clean module
+  signatures. **Does NOT edit** `backend/main.py`, `backend/forensic.py`,
+  `frontend/**`, `tests/test_forensic.py`, `PROJECT_SCOPE.md`, `STATUS.md`,
+  `REPORT.md`, `DATASET.md`.
+- **Agent A (integration / scheme):** Phase R end-to-end; ALL integration +
+  contract files (`backend/main.py`, `backend/forensic.py`,
+  `frontend/app/page.tsx`, the TypeScript `ForensicAnalysis` type,
+  `EXPECTED_KEYS`); `PROJECT_SCOPE.md`, `STATUS.md`, `REPORT.md`,
+  `DATASET.md`; wires Agent C's modules into `/predict` behind the country
+  gate; owns `scripts/fetch_jaaltaka.py` (conformed to the S.1 layout).
+
+---
+
 ## 5. Non-goals and honest limitations
 
 - **No UV/IR hardware detection.** UV stays a visible-light proxy, INFO-only,
   never a verdict driver. Stated plainly in the UI and report.
 - **No cloud deployment.** Local demonstration only.
-- **No multi-currency.** Indian Rupees only.
+- **Multi-currency: now IN SCOPE (Phase S), with honest limits.** Country
+  detection + polymer-specific checks span several currencies, but counterfeit
+  *benchmarking* is limited to **INR + BDT** (the only currencies for which we
+  have real fake images); there is no public polymer-counterfeit dataset. The
+  amended scope supersedes the original "Indian Rupees only" non-goal.
 - **No 100% accuracy claim.** Physically impossible from a phone photo without
   sensors. Honest target: solid, defensible accuracy per grade, reported with
   its confusion matrix — not a marketing number.

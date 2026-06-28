@@ -73,6 +73,49 @@ folder convention above holds.
 > first detector, but note it in the final report — true physical-counterfeit
 > images are scarce and the model's real-world ceiling depends on getting them.
 
+## 3b. Foreign / multi-currency datasets (Phase S)
+
+The project is expanding beyond Indian Rupees (see PROJECT_SCOPE Phase S —
+multi-currency / polymer). Foreign sources, best first:
+
+- **JaalTaka — Bangladeshi 500 / 1000 BDT, genuine + PHYSICAL counterfeit**
+  (Mendeley Data, DOI 10.17632/2m7wk5cy4c.2, **CC BY 4.0** — usable + citable).
+  8,340 smartphone images (4,812 genuine / 3,528 counterfeit); the counterfeits
+  came from Bangladesh's Rapid Action Battalion, so they are *real physical*
+  fakes (not digitally degraded). Each note is **six close-up crops of different
+  security regions** (portrait/serial, OVI numeral, hologram strip, watermark
+  window, …), NOT six full-note photos — so they feed the **ML / per-region
+  forensic** side, not the whole-note geometric checks (locate / proportions /
+  full serial). Landing page: <https://data.mendeley.com/datasets/2m7wk5cy4c/2>
+
+  **Do not download the full 7.58 GB.** `scripts/fetch_jaaltaka.py` reads the zip
+  index over HTTP range requests and pulls only a balanced, group-preserving
+  slice (~390 MB for 50 notes/class) into `dataset/foreign/bdt/`:
+  ```
+  venv\Scripts\python.exe scripts\fetch_jaaltaka.py --per-class 50
+  ```
+  > After fetching, do NOT re-run `train_classical.py` until the loader is made
+  > country-aware (Phase S.1) — otherwise these BDT crops get pooled with the
+  > INR full-note corpus and contaminate the committed Indian benchmark.
+
+- **BankNote-Net (Microsoft)** — 24,826 images, **17 currencies**, 112
+  denominations. The public release is **embeddings (256-dim vectors), not raw
+  images**, and **genuine only**. Useful for the country/currency *detection*
+  classifier (Phase S.2), not for forensic/polymer pixel checks.
+  <https://arxiv.org/abs/2204.03738>
+
+- **HuggingFace `Francesco/currency-v4f8j`** — small (813 imgs), pip-loadable
+  (`from datasets import load_dataset; load_dataset("Francesco/currency-v4f8j")`).
+  Coverage unspecified; a convenient "pip install it" smoke-test source.
+
+**Polymer caveat (honest):** public *polymer* counterfeit image datasets are
+essentially nonexistent — a survey of 16 counterfeit datasets found **none
+public**, and the UK polymer-substrate-fingerprinting set is research-only.
+BDT 500/1000 are paper notes. So polymer-specific checks (transparent-window,
+substrate sheen) are built and unit-tested on a handful of **genuine** polymer
+notes (AUD/GBP/CAD), while counterfeit *benchmarking* runs on INR + BDT where
+real fakes exist. This limitation is stated plainly in the report.
+
 ## 4. What gets committed
 
 - **Committed:** `docs/DATASET.md` (this file), `docs/BENCHMARK.md`,

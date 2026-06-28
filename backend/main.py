@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Body, Query, Response
+from fastapi import FastAPI, UploadFile, File, Form, Body, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 import importlib
@@ -27,7 +27,11 @@ from backend.forensic import (
 )
 from backend.classical import predict_classical, warmup_classical
 from backend.genai import explain as genai_explain, llm_available
-from backend.security_pattern import pattern_png
+from backend.security_pattern import pattern_png, secure_note_png
+from backend.secure_note import verify_secure_note
+from backend.foreign_routing import route_foreign
+from backend.country import detect_country
+from backend.polymer import analyze_polymer_features
 from backend.chatbot import (
     answer as chatbot_answer,
     llm_available as chatbot_llm_available,
@@ -417,3 +421,46 @@ def security_pattern(
     produce currency imagery."""
     png = pattern_png(seed, size)
     return Response(content=png, media_type="image/png")
+
+
+# =====================================================
+# SECURE-NOTE TOKEN (self-authenticating scheme) — Phase R.1
+# =====================================================
+
+@app.get("/secure-note/generate")
+def secure_note_generate(
+    serial: str = Query(..., min_length=1,
+                        description="Banknote serial; same serial → same token"),
+    size: int = Query(600, ge=128, le=1200),
+):
+    """Phase R.1 — generate a deterministic SECURE-NOTE TOKEN bound to a serial
+    number: a serial-seeded guilloché disc plus the canonical serial and a
+    verification CODE. Same serial (in any formatting) → byte-identical token.
+
+    This is a proof-of-concept of a *proposed* self-authenticating note — it is
+    NOT real currency and NOT verification of real banknotes (real notes carry
+    no serial-derived guilloché)."""
+    png = secure_note_png(serial, size)
+    return Response(content=png, media_type="image/png")
+
+
+@app.post("/secure-note/verify")
+async def secure_note_verify(
+    file: UploadFile = File(...),
+    serial: str | None = Form(None),
+):
+    """Phase R.2 — verify a SECURE-NOTE TOKEN by regenerating the guilloché its
+    serial should produce and comparing it to the guilloché in the uploaded
+    image (SSIM). `serial` is optional: if omitted it is OCR'd from the token
+    header. Returns AUTHENTIC / TAMPERED / UNVERIFIED + similarity.
+
+    Closed-loop proof-of-concept — verifies tokens we generate, NOT real
+    banknotes."""
+    try:
+        _, bgr = _decode_upload(await file.read())
+        return verify_secure_note(bgr, serial=serial)
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+    except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}

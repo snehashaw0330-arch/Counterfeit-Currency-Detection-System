@@ -6,7 +6,38 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-04 (chatbot voice input + Track-A item 1 robust localization shipped)
+**Last updated:** 2026-06-28 (big requirement kicked off: Phase R self-auth
+note scheme + Phase S multi-currency/polymer; two-agent parallel split)
+
+## 🆕 Active effort — Phase R + Phase S (two agents in parallel)
+
+The big new requirement (serial-guilloché generation + verification, digital
+PUF, foreign/polymer multi-currency detection) is split into two contract
+phases — see [PROJECT_SCOPE.md](PROJECT_SCOPE.md) §4 (Phase R, Phase S, and the
+two-agent file-ownership table). Decisions locked with the user:
+- **Guilloché/PUF = closed-loop PoC** (a proposed self-authenticating note),
+  NOT verification of real RBI notes.
+- **Multi-currency = formally in scope** (Phase S); reverses the old INR-only
+  non-goal. Counterfeit benchmarking honestly limited to **INR + BDT** (no
+  public polymer-counterfeit data).
+- **Two-agent split:** Agent C owns foreign/data NEW modules (`backend/country.py`,
+  `backend/polymer.py`, BankNote-Net scripts, `dataset/foreign/**`, foreign
+  docs). Agent A (me) owns Phase R + ALL integration/contract files
+  (`main.py`, `forensic.py`, `frontend`, `EXPECTED_KEYS`, scope/status/report/
+  dataset docs) and wires C's modules into `/predict` behind a country gate.
+
+**Data landed so far:** JaalTaka (Bangladesh, real + physical counterfeit) via
+`scripts/fetch_jaaltaka.py` — partial-zip HTTP-range fetch, validation slice of
+96 imgs verified (0 corrupt). BankNote-Net embeddings + a 17-currency classifier
+(95% in-distribution) fetched/trained by Agent C — **embeddings-only, genuine-
+only, no encoder shipped, no BDT class** → kept as an OFFLINE benchmark, not the
+live country-detection path. Dataset layout locked to
+`dataset/foreign/<ccy>/{full_note,security_crops}/{real,fake}` + metadata.
+
+**Next build step (Agent A):** Phase R.1 — serial→guilloché secure-note token +
+`POST /secure-note/generate`.
+
+
 
 ## ⏭️ NEXT SESSION — resume here
 

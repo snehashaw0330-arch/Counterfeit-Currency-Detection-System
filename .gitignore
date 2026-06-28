@@ -25,9 +25,13 @@ tests/ocr_debug/
 # Phase D classical model binaries (regenerable: scripts/train_classical.py).
 # metrics.json is kept tracked as the committed benchmark record.
 models/classical/*.joblib
+models/banknote_net/
 
 # Phase F experimental CNN (not adopted; regenerable via scripts/train_cnn.py)
 models/*_v2.keras
+
+# Foreign-currency datasets and reference pulls (all regenerable)
+dataset/foreign/
 
 # Scratch eval/calibration console dumps (regenerable via the scripts)
 eval_out.txt

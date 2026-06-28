@@ -30,6 +30,7 @@ Pure numpy + PIL. No model weights, no network.
 """
 
 import io
+import re
 import math
 import hashlib
 import colorsys
@@ -264,6 +265,99 @@ def generate_pattern(seed, size=DEFAULT_SIZE) -> Image.Image:
 def pattern_png(seed, size=DEFAULT_SIZE) -> bytes:
     """Generate the pattern and encode it as PNG bytes. Never raises."""
     img = generate_pattern(seed, size)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+# ----------------------------------------------------------------------------
+# Secure-note token (Phase R.1) — bind a serial number to its guilloché
+# ----------------------------------------------------------------------------
+#
+# A "secure-note token" demonstrates a *proposed* self-authenticating note: the
+# serial number deterministically seeds the guilloché, and the canonical serial
+# plus a short verification CODE (derived from the same serial) are printed on a
+# clean header so a photo of the token can later be OCR'd, the pattern
+# regenerated, and the two compared (Phase R.2). Same serial — in ANY
+# formatting — yields a byte-identical token. This is NOT real currency (no
+# portrait / denomination / issuer wording) and NOT verification of real notes.
+
+
+def normalize_serial(serial) -> str:
+    """Canonical serial: keep alphanumerics only, uppercased — so 'abc 123',
+    'ABC-123' and 'ABC123' all bind to the SAME pattern and CODE."""
+    return re.sub(r"[^A-Za-z0-9]", "", str(serial)).upper()
+
+
+def serial_token(serial) -> str:
+    """Short deterministic verification CODE that binds serial <-> guilloché.
+
+    SHA-256 over the canonical serial (domain-separated), first 8 hex chars.
+    Stable across machines/runs."""
+    norm = normalize_serial(serial)
+    digest = hashlib.sha256(("SECURE-NOTE/" + norm).encode("utf-8")).hexdigest()
+    return digest[:8].upper()
+
+
+def _load_font(size):
+    """Pillow's scalable default font at `size` px (≥10.1), so the printed
+    serial is crisp and OCR-readable without depending on a system font.
+    Falls back to the fixed bitmap font on very old Pillow."""
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _text_strip(text, color, target_w, pad=4):
+    """Render `text` crisply at a font size chosen so the strip is ~`target_w`
+    px wide — large/clean enough to OCR the serial back (R.2)."""
+    text = text or " "
+    probe = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
+    base = 24
+    font = _load_font(base)
+    l, t, r, b = probe.textbbox((0, 0), text, font=font)
+    w = max(1, r - l)
+    # rescale the font so the rendered width lands near target_w
+    font = _load_font(max(11, int(base * target_w / w)))
+    l, t, r, b = probe.textbbox((0, 0), text, font=font)
+    tw, th = max(1, r - l), max(1, b - t)
+    tile = Image.new("RGBA", (tw + 2 * pad, th + 2 * pad), (0, 0, 0, 0))
+    ImageDraw.Draw(tile).text((pad - l, pad - t), text, font=font,
+                              fill=color + (255,))
+    return tile
+
+
+def secure_note_token(serial, size=DEFAULT_SIZE) -> Image.Image:
+    """Deterministic SECURE-NOTE TOKEN for `serial`: the serial-seeded guilloché
+    disc plus a clean header carrying the canonical serial and its verification
+    CODE. Same serial (any formatting) -> byte-identical image. Never raises."""
+    norm = normalize_serial(serial)
+    code = serial_token(norm)
+    size = _clamp_size(size)
+    paper = (245, 241, 232, 255)
+    ink = (40, 52, 74)
+    try:
+        disc = generate_pattern(norm, size)  # RGBA guilloché, serial-seeded
+        header_h = max(56, int(size * 0.2))
+        canvas = Image.new("RGBA", (size, size + header_h), paper)
+        canvas.alpha_composite(disc, (0, header_h))
+
+        title = _text_strip("SECURE NOTE TOKEN", ink, int(size * 0.46))
+        canvas.alpha_composite(title, ((size - title.width) // 2,
+                                       int(header_h * 0.14)))
+        line = _text_strip(f"SERIAL {norm or '-'}   CODE {code}", ink,
+                           int(size * 0.78))
+        canvas.alpha_composite(line, ((size - line.width) // 2,
+                                      int(header_h * 0.52)))
+        return canvas
+    except Exception:
+        return _fallback_pattern(size, _seed_to_int(norm))
+
+
+def secure_note_png(serial, size=DEFAULT_SIZE) -> bytes:
+    """Generate the secure-note token and encode it as PNG bytes. Never raises."""
+    img = secure_note_token(serial, size)
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
