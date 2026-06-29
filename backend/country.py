@@ -29,6 +29,8 @@ _COUNTRY_INFO = {
     "CAD": {"country": "Canada", "currency": "CAD"},
     "AUD": {"country": "Australia", "currency": "AUD"},
     "PHP": {"country": "Philippines", "currency": "PHP"},
+    "USD": {"country": "United States", "currency": "USD"},
+    "EUR": {"country": "Eurozone", "currency": "EUR"},
 }
 
 _TEXT_PATTERNS = {
@@ -73,6 +75,20 @@ _TEXT_PATTERNS = {
         (r"\bPISO\b", 2.0),
         (r"\bPESO\b", 1.5),
     ],
+    "USD": [
+        (r"\bFEDERAL RESERVE\b", 8.0),
+        (r"\bUNITED STATES OF AMERICA\b", 8.0),
+        (r"\bUNITED STATES\b", 4.0),
+        (r"\bLEGAL TENDER FOR ALL DEBTS\b", 6.0),
+        (r"\bLEGAL TENDER\b", 2.5),
+        (r"\bTHIS NOTE\b", 1.5),
+    ],
+    "EUR": [
+        (r"\bEUROPEAN CENTRAL BANK\b", 8.0),
+        (r"\bEURO\b", 4.0),
+        (r"\b(ECB|EZB|BCE)\b", 3.0),
+        (r"[Α-Ω]{3,}", 1.0),  # Greek (EYPΩ) on euro notes
+    ],
 }
 
 # Weak colour priors used only as tie-breakers when OCR is sparse.
@@ -84,6 +100,8 @@ _PALETTE_PRIORS = {
     "CAD": np.array([58.0, 80.0, 145.0], dtype=np.float32),
     "AUD": np.array([165.0, 78.0, 160.0], dtype=np.float32),
     "PHP": np.array([112.0, 75.0, 140.0], dtype=np.float32),
+    "USD": np.array([60.0, 35.0, 150.0], dtype=np.float32),   # muted green-grey
+    "EUR": np.array([20.0, 60.0, 150.0], dtype=np.float32),   # varies by denom; weak prior
 }
 
 _ASPECT_PRIOR = {
@@ -93,6 +111,8 @@ _ASPECT_PRIOR = {
     "CAD": 2.18,
     "AUD": 2.00,
     "PHP": 2.42,
+    "USD": 2.35,
+    "EUR": 1.93,
 }
 
 
@@ -148,31 +168,32 @@ def _ocr_texts_tesseract(variants: Iterable[np.ndarray]) -> list[str]:
 
 
 def _ocr_texts_easyocr(bgr: np.ndarray) -> list[str]:
+    """EasyOCR via the SHARED forensic singleton — no second Reader and no
+    per-call ~3 s model load (the backend warms it at startup). Returns
+    normalized text lines, or [] if EasyOCR is unavailable."""
     try:
-        import easyocr
-    except Exception:
-        return []
-
-    langs = ["en"]
-    out = []
-    try:
-        reader = easyocr.Reader(langs, gpu=False, verbose=False)
+        from backend.forensic import _get_easyocr_reader
+        reader = _get_easyocr_reader()
+        if reader is None:
+            return []
         results = reader.readtext(bgr, detail=0, paragraph=True)
-        for text in results:
-            text = _normalize_text(str(text))
-            if text:
-                out.append(text)
     except Exception:
         return []
+    out = []
+    for text in results:
+        text = _normalize_text(str(text))
+        if text:
+            out.append(text)
     return out
 
 
 def _ocr_text_pool(bgr: np.ndarray) -> list[str]:
-    variants = _ocr_variants(bgr)
-    texts = []
-    texts.extend(_ocr_texts_tesseract(variants))
+    # EasyOCR (shared singleton) is the project's primary OCR — it replaced
+    # Tesseract on banknote fonts. Tesseract is kept only as a last-resort
+    # fallback if EasyOCR is unavailable (and its binary happens to be present).
+    texts = _ocr_texts_easyocr(bgr)
     if not texts:
-        texts.extend(_ocr_texts_easyocr(bgr))
+        texts.extend(_ocr_texts_tesseract(_ocr_variants(bgr)))
     # Deduplicate while preserving order.
     seen = set()
     uniq = []

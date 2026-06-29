@@ -22,8 +22,8 @@ this file is the living checklist we work through **one item at a time**.
 | 7 | Automatic country & currency detection | ✅ Done (GBP still weak/UNKNOWN) |
 | 8 | Multi-currency **counterfeit** detection | 🟢 Done for INR + BDT (BDT model: 0.909 image / 0.955 note acc); AUD/CAD/GBP/PHP impossible (no public fake data) |
 | 9 | Polymer-specific forensic/security checks | ✅ Done (window + sheen; tested on genuine refs) |
-| 10 | Update report (guilloché, PUF, polymer) | 🔴 Not done |
-| 11 | Evaluate on Indian + foreign datasets | 🔴 Not done |
+| 10 | Update report (guilloché, PUF, polymer) | 🟢 Done (REPORT §10 + GENAI_EXPLAINED Parts 5–6 + PROJECT_SCOPE R/S acceptance) |
+| 11 | Evaluate on Indian + foreign datasets | 🟢 Done ([MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md): BDT 0.909/0.955, INR 0.765, one-class rejected) |
 
 ---
 
@@ -83,24 +83,34 @@ this file is the living checklist we work through **one item at a time**.
 - **Acceptance met:** honest group-aware metrics recorded; live path verified
   (real→REAL, fake→FAKE); 60 fast tests + 6 API tests green; INR path unchanged.
 
-### T3 — Evaluation: INR vs foreign (item 11)
-- Per-currency confusion matrices + comparison table (INR counterfeit, BDT
-  counterfeit, foreign currency-ID accuracy). Script-driven + reproducible.
-- **Acceptance:** numbers committed to `docs/BENCHMARK.md` / report; method
-  honest (no test peeking, group-aware).
+### T3 — Evaluation: INR vs foreign (item 11) — ✅ DONE
+- [MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md): per-currency tables —
+  **BDT supervised 0.909 image / 0.955 note**, **INR supervised 0.765** (65-img
+  fixture corpus), and the **one-class genuine-only experiment** (ROC-AUC 0.66 ≪
+  supervised → rejected; `scripts/train_oneclass_anomaly.py`).
+- Fixed a pre-existing wart: the committed INR `metrics.json` was stale (RF 0.98
+  on a 7,471-img June-19 dataset not present here, ≠ BENCHMARK.md). Retrained INR
+  classical on the clean 65-img corpus so model + metrics + BENCHMARK.md agree.
+- **Honest cross-currency finding:** methodology transfers; data quantity is the
+  ceiling (BDT 672→0.91 vs INR 65→0.65–0.76); counterfeit needs labelled fakes.
 
-### T4 — Update the report (item 10)
-- `docs/REPORT.md` + `docs/GENAI_EXPLAINED.md`: add the secure-note scheme
-  (guilloché generation + verification), the digital PUF, country detection, and
-  polymer checks — with the honest limits below. Tick Phase R/S acceptance in
-  `PROJECT_SCOPE.md`.
+### T4 — Update the report (item 10) — ✅ DONE
+- `docs/REPORT.md` §10 (self-auth scheme + multi-currency + cross-currency
+  evaluation + honest limits) + abstract/header/limitations updates.
+- `docs/GENAI_EXPLAINED.md` Parts 5–6 (plain-language self-checking note +
+  multi-currency, with honest caveats).
+- `docs/PROJECT_SCOPE.md` Phase R & S marked ✅ SHIPPED with acceptance.
 
-### T5 — Polish (optional, as time allows)
-- `country.py` OCR: reuse forensic's EasyOCR singleton instead of a new Reader
-  per call + drop Tesseract-first (aligns with the project's EasyOCR migration;
-  removes per-call latency) — coordinate with Codex (his lane).
-- Improve GBP detection (currently stays UNKNOWN — honest but a miss).
-- Run a full `next build` before the demo.
+### T5 — Polish — ✅ DONE
+- `country.py` now uses the **shared EasyOCR singleton** (no second Reader / no
+  per-call ~3 s load) and EasyOCR is primary (Tesseract last-resort) — aligns with
+  the project's EasyOCR migration and removes the /predict-gate latency.
+- **Added USD + EUR** detection (8 currencies total); currency-ID now **6/7** on
+  genuine references (AUD/CAD/PHP/USD/EUR/INR confident). Removed two **mislabelled
+  CAD images** the autonomous Wikipedia fetch grabbed (a US picture) — data fix.
+  GBP stays an honest `UNKNOWN` (its specimen OCRs garbled — image-quality limit).
+- **`next build` clean** (compiled + TypeScript pass + static pages); 60 fast
+  tests green after all changes.
 
 ---
 

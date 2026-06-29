@@ -28,6 +28,7 @@ models/classical/*.joblib
 models/banknote_net/
 # Phase T2 BDT counterfeit model binaries (regenerable; metrics.json kept tracked)
 models/bdt/*.joblib
+models/bdt/_features_cache.npz
 
 # Phase F experimental CNN (not adopted; regenerable via scripts/train_cnn.py)
 models/*_v2.keras

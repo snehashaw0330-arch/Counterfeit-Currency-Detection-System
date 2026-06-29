@@ -323,6 +323,12 @@ sample and rejects a different one; never raises; new endpoints + frontend
 panel; existing tests + diagnostic harness show **no regression**. Honest
 framing in the UI and report (this is a scheme demo, not real-note verification).
 
+**Status — ✅ SHIPPED (2026-06-29):** R.1 (`/secure-note/generate`), R.2
+(`/secure-note/verify`, calibrated 3-band + OCR-trust), R.3 (`/puf/enroll|verify`,
+calibrated), R.4 (`SecureNoteStudio` frontend), R.5 (tests + report §10). 34
+Phase-R tests green; INR `/predict` unchanged. See
+[PHASE_RS_PROGRESS.md](PHASE_RS_PROGRESS.md).
+
 ### Phase S — Multi-currency / polymer detection
 
 **Goal.** Extend beyond INR to multi-country detection with country-aware
@@ -357,6 +363,13 @@ genuine fixtures; the **INR verdict path is unchanged (no regression)**; the
 per-currency benchmark regenerates from a script. Polymer-*counterfeit*
 benchmarking is honestly limited to INR + BDT — there is no public polymer
 counterfeit dataset (see [DATASET.md](DATASET.md)).
+
+**Status — ✅ SHIPPED (2026-06-29):** S.1 (locked layout + 672-img BDT slice,
+`build_dataset.py` skips `dataset/foreign/`), S.2 (`country.py`, 6 currencies +
+UNKNOWN), S.3/S.5 (`foreign_routing.py` zero-cost gate, INR path unchanged), S.4
+(`polymer.py`), **BDT counterfeit model 0.909/0.955** (`train_bdt_counterfeit.py`),
+S.6 ([MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md), incl. the rejected one-class
+experiment). AUD/CAD/GBP/PHP = identification + polymer cues only (no fake data).
 
 ### Parallel execution — two-agent file ownership
 

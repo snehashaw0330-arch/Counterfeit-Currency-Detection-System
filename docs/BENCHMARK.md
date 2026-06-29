@@ -15,13 +15,13 @@
 
 | Technique | CV macro-F1 | Test acc | Test macro-F1 | Prec (genuine) | Recall (genuine) | Prec (fake) | Recall (fake) |
 |---|---|---|---|---|---|---|---|
-| Logistic Regression | 0.460 | 0.706 | 0.622 | 0.714 | 0.909 | 0.667 | 0.333 |
-| SVM (RBF) | 0.403 | 0.765 | 0.742 | 0.818 | 0.818 | 0.667 | 0.667 |
-| Random Forest | 0.497 | 0.765 | 0.742 | 0.818 | 0.818 | 0.667 | 0.667 |
-| KNN | 0.453 | 0.529 | 0.514 | 0.667 | 0.545 | 0.375 | 0.500 |
+| Logistic Regression | 0.443 | 0.706 | 0.622 | 0.714 | 0.909 | 0.667 | 0.333 |
+| SVM (RBF) | 0.441 | 0.765 | 0.742 | 0.818 | 0.818 | 0.667 | 0.667 |
+| Random Forest | 0.478 | 0.647 | 0.614 | 0.727 | 0.727 | 0.500 | 0.500 |
+| KNN | 0.452 | 0.588 | 0.582 | 0.750 | 0.545 | 0.444 | 0.667 |
 | MobileNetV2 (CNN) | — (not CV'd) | 0.588 | 0.564 | 0.700 | 0.636 | 0.429 | 0.500 |
 
-**Best on test macro-F1:** SVM (RBF) (0.742). Best classical by CV: Random Forest (0.497).
+**Best on test macro-F1:** SVM (RBF) (0.742). Best classical by CV: Random Forest (0.478).
 
 ## Confusion matrices (test)
 
@@ -43,14 +43,14 @@
 
 | actual ↓ / pred → | fake | genuine |
 |---|---|---|
-| **fake** | 4 | 2 |
-| **genuine** | 2 | 9 |
+| **fake** | 3 | 3 |
+| **genuine** | 3 | 8 |
 
 ### KNN
 
 | actual ↓ / pred → | fake | genuine |
 |---|---|---|
-| **fake** | 3 | 3 |
+| **fake** | 4 | 2 |
 | **genuine** | 5 | 6 |
 
 ### MobileNetV2 (CNN)

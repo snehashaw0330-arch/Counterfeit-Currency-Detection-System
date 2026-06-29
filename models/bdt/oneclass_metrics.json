@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "dataset": "JaalTaka BDT (genuine + physical counterfeit)",
+    "approach": "one-class (trained on GENUINE crops only); fakes used for evaluation only",
+    "split": "group-aware by note, seed 42 (same as supervised)",
+    "train_genuine": 270,
+    "test_images": 132,
+    "supervised_reference": {
+      "best_model": "random_forest",
+      "image_accuracy": 0.9091,
+      "note_accuracy": 0.9545
+    },
+    "honest_note": "One-class screening needs only genuine data to TRAIN, but needs counterfeits to VALIDATE. It is measured here on BDT; for AUD/CAD/GBP/PHP it cannot be validated (no public fakes)."
+  },
+  "models": {
+    "isolation_forest": {
+      "roc_auc": 0.6644,
+      "note_roc_auc": 0.6446,
+      "genuine_pass_at_op": 0.9091,
+      "fake_catch_at_op": 0.0152,
+      "operating_point": "threshold for ~95% genuine pass on train"
+    },
+    "oneclass_svm": {
+      "roc_auc": 0.6635,
+      "note_roc_auc": 0.6529,
+      "genuine_pass_at_op": 0.7879,
+      "fake_catch_at_op": 0.4697,
+      "operating_point": "threshold for ~95% genuine pass on train"
+    }
+  }
+}

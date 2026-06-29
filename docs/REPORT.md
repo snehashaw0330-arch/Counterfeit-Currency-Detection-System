@@ -2,9 +2,10 @@
 ### Project Report
 
 **Author:** Sneha Shaw
-**Currency:** Indian Rupees (Mahatma Gandhi New Series + common older series)
+**Currency:** Indian Rupees (primary) + Bangladeshi Taka counterfeit detection;
+multi-currency identification (AUD/CAD/GBP/PHP/USD/EUR)
 **Deployment:** local demonstration (FastAPI backend + Next.js frontend)
-**Date:** 2026-06-01
+**Date:** 2026-06-01 (extended 2026-06-29 — Phases R & S, see §10)
 
 ---
 
@@ -23,6 +24,16 @@ classical models (best: SVM / Random Forest ≈ 0.74 macro-F1) outperform the
 CNN (≈ 0.56). End-to-end, the system **never misclassifies a genuine note as
 fake (0% false positives)** and flags ~61% of fakes, with an honestly-stated
 ceiling driven by training-data volume rather than method.
+
+The system was subsequently extended (§10) with a **self-authenticating-note
+scheme** (a serial number deterministically generates a guilloché that can be
+re-derived and verified, plus a digital-PUF texture fingerprint) and
+**multi-currency support** (automatic country/currency detection for six
+currencies, polymer security-feature checks, and a **Bangladeshi-Taka counterfeit
+model that reaches 0.909 image / 0.955 note accuracy** on real physical fakes).
+Throughout, claims are limited to what is measurable: a genuine-only (one-class)
+counterfeit screen was tested and **rejected** (ROC-AUC ≈ 0.66), and currencies
+without public counterfeit data get identification only.
 
 ---
 
@@ -227,6 +238,9 @@ system returns INFO rather than guessing, so it never manufactures confidence.
   physical-fake) images is the single biggest lever.
 - **Single-side input** limits see-through-register style checks.
 - **No 100% guarantee** — impossible from a photo without sensors.
+- **Foreign currencies (Phase S):** counterfeit detection exists only for BDT
+  (real fakes); AUD/CAD/GBP/PHP are identification + polymer cues only, and the
+  self-authenticating-note scheme is a proof-of-concept — see §10.4.
 
 ---
 
@@ -257,3 +271,101 @@ cd frontend && npm run dev                                    # frontend
 Full scope and phase history: [PROJECT_SCOPE.md](PROJECT_SCOPE.md),
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md), [STATUS.md](STATUS.md).
 Demo briefing: [DEMO_UPDATE.md](DEMO_UPDATE.md).
+
+---
+
+## 10. Extension — Self-authenticating notes (Phase R) & multi-currency (Phase S)
+
+A second phase of work added a novel anti-counterfeit *scheme* and broadened the
+system beyond Indian Rupees. The same engineering discipline applies: every
+feature is additive (the INR verdict path is byte-for-byte unchanged and
+regression-tested), and every claim is bounded by what we can measure.
+
+### 10.1 Self-authenticating note scheme (Phase R)
+
+A proof-of-concept of a banknote that authenticates *itself*. **This is a design
+demonstration, not verification of real currency** — real notes carry neither a
+serial-derived guilloché nor an enrolled fingerprint.
+
+- **Serial → guilloché generation** (`backend/security_pattern.py`,
+  `GET /secure-note/generate`). A serial number deterministically seeds a
+  guilloché "secure-note token"; the *same* serial — in any formatting — always
+  yields a byte-identical pattern (SHA-256-seeded). The canonical serial and an
+  8-hex verification CODE are printed crisply enough to OCR back.
+- **Closed-loop verification** (`backend/secure_note.py`,
+  `POST /secure-note/verify`). The serial's expected guilloché is regenerated at
+  the disc's native scale and compared to the one extracted from the upload by
+  structural similarity (SSIM). A **calibrated three-band verdict**
+  (AUTHENTIC ≥ 0.55 · TAMPERED ≤ 0.45 · UNVERIFIED between) gives a ~0.10 margin
+  over the worst forgery (0.447), so a wrong pattern is never falsely
+  authenticated. An **OCR-trust rule** prevents a misread serial from ever
+  producing a false TAMPERED — an OCR'd serial can only yield AUTHENTIC or
+  UNVERIFIED.
+- **Digital PUF** (`backend/puf.py`, `POST /puf/enroll` · `POST /puf/verify`).
+  A texture-fingerprint (high-pass perceptual hash) of a fixed region, with a
+  local registry and an enroll → verify loop. Calibrated Hamming threshold 0.25:
+  same-capture (JPEG/resize/brightness) stays ≤ 0.04, different captures ≥ 0.36.
+  Stated honestly as a software proxy — a true PUF needs controlled capture, and
+  it is an *identity* check that requires prior enrollment, not a counterfeit
+  detector.
+
+### 10.2 Multi-currency detection (Phase S)
+
+- **Automatic country/currency detection** (`backend/country.py`). OCR-first
+  (issuer text / script) with palette/aspect tie-breaks and an explicit
+  **UNKNOWN** fallback; covers INR, BDT, AUD, CAD, GBP, PHP. Integrated into
+  `/predict` behind a **zero-cost gate** — the detector runs only when the
+  INR-tuned pipeline did *not* identify an Indian note, so the common path pays
+  nothing and stays unchanged.
+- **Polymer security checks** (`backend/polymer.py`). Transparent-window and
+  substrate-sheen detection, conservative (PASS on evidence, INFO otherwise,
+  **never** a substrate-only FAIL).
+- **Bangladeshi-Taka counterfeit model** (`scripts/train_bdt_counterfeit.py`,
+  `backend/bdt_classifier.py`). Trained on the public **JaalTaka** dataset
+  (genuine + *physical* counterfeit 500/1000 BDT) — the only foreign currency
+  with real fakes. Same 50-d feature pipeline as INR, **group-aware split by
+  note** (a note's six security-region crops never straddle train/test). A
+  confidently-detected BDT note routes to this model and receives a real
+  REAL/SUSPICIOUS/FAKE verdict.
+
+### 10.3 Cross-currency evaluation ([MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md))
+
+| Currency | Corpus (held-out) | Best technique | Accuracy |
+|---|---|---|---|
+| **BDT** | 672 imgs · 132 test / 22 notes | Random Forest | **0.909 image / 0.955 note** |
+| **INR** | 65 imgs · 17 test | SVM (RBF) | 0.765 |
+
+The gap is the project's thesis made concrete: **data quantity is the ceiling,
+not the method** — the identical pipeline scores 0.91 on 672 BDT images and
+0.65–0.76 on 65 INR fixtures.
+
+**Genuine-only screening, tested and rejected.** A one-class approach (Isolation
+Forest / One-Class SVM trained on genuine BDT only) scored **ROC-AUC ≈ 0.66** —
+barely above chance — versus 0.909 for the supervised model that sees fakes. A
+counterfeit is *built* to resemble a genuine note, so it sits inside the genuine
+distribution and an anomaly detector cannot isolate it. **Counterfeit detection
+requires labelled fakes**; we therefore do not ship genuine-only "detectors".
+
+### 10.4 Honest limits of the extension
+
+- **Foreign counterfeit detection exists only for BDT** (and INR). AUD/CAD/GBP/PHP
+  get identification + polymer cues only — there is **no public polymer-counterfeit
+  dataset** to train or validate against (confirmed by survey; the genuine-only
+  experiment above shows training on genuine alone does not substitute).
+- **The secure-note scheme is a proof-of-concept**, not a check on real banknotes.
+- **The digital PUF is a software proxy** and requires enrollment to verify.
+- **BankNote-Net** (17-currency embeddings) is kept as an offline benchmark only
+  (no encoder shipped), not on the live path.
+
+### 10.5 Reproduce (extension)
+
+```
+venv\Scripts\python.exe scripts\fetch_jaaltaka.py --per-class 50   # BDT slice (range-fetch)
+venv\Scripts\python.exe scripts\validate_foreign_dataset.py        # layout + metadata
+venv\Scripts\python.exe scripts\train_bdt_counterfeit.py           # BDT model -> models/bdt
+venv\Scripts\python.exe scripts\train_oneclass_anomaly.py          # one-class comparison
+venv\Scripts\python.exe -m pytest tests\test_phase_r_secure_note.py tests\test_phase_r_verify.py \
+    tests\test_phase_r_puf.py tests\test_phase_s_integration.py tests\test_phase_t_bdt.py
+```
+
+Phase R & S working checklist: [PHASE_RS_PROGRESS.md](PHASE_RS_PROGRESS.md).

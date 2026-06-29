@@ -6,8 +6,8 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-28 (big requirement kicked off: Phase R self-auth
-note scheme + Phase S multi-currency/polymer; two-agent parallel split)
+**Last updated:** 2026-06-29 (Phase R + S + T1–T5 complete — self-auth scheme,
+BDT counterfeit model 0.909/0.955, multi-currency detection, evaluation + report)
 
 ## 🆕 Active effort — Phase R + Phase S (two agents in parallel)
 
@@ -54,11 +54,26 @@ test_api green, no regression):**
 - **Tests:** test_phase_r_secure_note(9), _verify(13), _verify_ocr(3 slow),
   _puf(12), test_phase_s_integration(6), + Codex country/polymer(13) + api(6) — green.
 
-**Next build steps (Agent A):** R.4 frontend (SecureNoteStudio generate+verify,
-PUF enroll/verify, country/polymer display) → R.5 docs (GENAI_EXPLAINED/REPORT,
-PROJECT_SCOPE acceptance) → normalize BDT tree to locked layout
-(`dataset/foreign/bdt/security_crops/{real,fake}`) + conform `fetch_jaaltaka.py`
-+ pull full slice (validate_foreign_dataset.py flags the current old layout).
+**STATUS (2026-06-29): Phase R + Phase S + T1–T5 COMPLETE.** All 11 requirement
+items addressed at their honest ceiling — see the scorecard + checklist in
+[PHASE_RS_PROGRESS.md](PHASE_RS_PROGRESS.md). Highlights:
+- R.4 frontend (`SecureNoteStudio` generate/verify/PUF + `CountryDetectionPanel`)
+  shipped; `next build` clean.
+- BDT tree normalized to the locked layout + full slice (672 imgs);
+  `build_dataset.py` skips `dataset/foreign/`; `validate_foreign_dataset.py` green.
+- **BDT counterfeit model 0.909 image / 0.955 note** (`models/bdt`);
+  genuine-only one-class tested + **rejected** (ROC-AUC 0.66).
+- Fixed a stale INR `metrics.json` (7,471-img June-19 set, gone) → retrained on
+  the clean 65-img corpus so model/metrics/BENCHMARK agree.
+- Country detection now 8 currencies via the **shared EasyOCR singleton**
+  (added USD/EUR; GBP honest UNKNOWN); evaluation in
+  [MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md); report updated (REPORT §10).
+
+**Coordination note:** `backend/country.py` (Agent C's lane) was edited by Agent
+A during T5 (singleton + USD/EUR) — reconcile if Codex resumes.
+
+**Open verification at handoff:** full `pytest tests/` + `diagnostic_harness.py`
+regression run; live HTTP smoke of the new endpoints; nothing committed yet.
 
 
 

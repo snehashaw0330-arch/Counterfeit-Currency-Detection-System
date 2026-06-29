@@ -147,6 +147,45 @@ How it behaves:
 
 ---
 
+## Part 5 — The "self-checking note" (new)
+
+We took the un-clonable-pattern idea one step further and built a **note that can
+prove it's real by itself** — as a demonstration of how future money *could* be
+designed.
+
+- You type a **serial number** → the app draws that note's unique guilloché.
+- Later you can **upload a photo of that note back**, and the app **re-draws the
+  pattern from the serial and compares**. If they match → **AUTHENTIC**; if the
+  pattern was tampered with → **TAMPERED**; if the photo's too blurry to be sure
+  → it honestly says **"can't tell"** instead of guessing.
+- We also added a **"fingerprint" (a digital PUF)**: every physical note has a
+  tiny, unique surface texture, like a fingerprint. You can **register** a note,
+  then later **check** whether a photo is that same physical note.
+
+> **Honest bit:** this is a *design demo*, not a check on today's real notes —
+> real banknotes don't carry a serial-made pattern or a registered fingerprint.
+> It shows the *idea* of a note that authenticates itself.
+
+## Part 6 — It now understands other countries' money (new)
+
+The app used to be India-only. Now it **first works out which country's note it's
+looking at** (India, Bangladesh, Australia, Canada, UK, Philippines) and routes
+accordingly — and it says **"not sure"** rather than guessing when it can't tell.
+
+- For **Bangladeshi notes** we trained a real fake-detector on a public dataset
+  that actually contains **genuine *and* real counterfeit** notes. It reaches
+  about **91%** accuracy (95% when it looks at several parts of the note) — a
+  genuinely strong result.
+- For **plastic (polymer) notes** like Australian/Canadian/British ones, it
+  checks for the **see-through window** and the glossy plastic feel.
+
+> **Honest bit (important):** we can only *catch fakes* for countries where real
+> fake examples exist to learn from — India and Bangladesh. For the others the
+> app tells you **which** note it is and checks the plastic features, but it
+> **can't judge real-vs-fake**, because no public set of those fakes exists. We
+> even tested "just learn what genuine looks like and flag the rest" — it didn't
+> work (barely better than a coin flip), so we don't pretend it does.
+
 ## Putting it together — what to tell someone in 20 seconds
 
 - You **photograph a note**, the app gives an **honest verdict** and shows *why*.

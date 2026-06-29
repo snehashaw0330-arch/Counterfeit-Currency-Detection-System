@@ -54,97 +54,97 @@
       "watermark_logvar",
       "vthread_energy"
     ],
-    "train_rows": 5603,
-    "test_rows": 1868,
+    "train_rows": 503,
+    "test_rows": 17,
     "augmentation": {
-      "aug_genuine": 0,
-      "aug_fake": 0
+      "aug_genuine": 7,
+      "aug_fake": 14
     },
     "label_scheme": "1=genuine, 0=fake",
     "selection_metric": "cv_macro_f1_mean",
     "best_model": "random_forest",
-    "data_caveat": "Held-out TEST split is 1868 images, so test metrics are higher-variance than the group-aware CV estimate on the augmented train split. Model selection uses CV (no test-set peeking). Add more images into dataset/real|fake and re-run build_dataset.py + this script to improve generalisation."
+    "data_caveat": "Held-out TEST split is 17 images, so test metrics are higher-variance than the group-aware CV estimate on the augmented train split. Model selection uses CV (no test-set peeking). Add more images into dataset/real|fake and re-run build_dataset.py + this script to improve generalisation."
   },
   "models": {
     "logistic_regression": {
-      "test_accuracy": 0.9192,
-      "test_macro_f1": 0.9115,
-      "precision_fake": 0.8462,
-      "recall_fake": 0.9283,
-      "precision_genuine": 0.9618,
-      "recall_genuine": 0.9145,
+      "test_accuracy": 0.7059,
+      "test_macro_f1": 0.6222,
+      "precision_fake": 0.6667,
+      "recall_fake": 0.3333,
+      "precision_genuine": 0.7143,
+      "recall_genuine": 0.9091,
       "confusion_matrix": [
         [
-          583,
-          45
+          2,
+          4
         ],
         [
-          106,
-          1134
+          1,
+          10
         ]
       ],
-      "cv_macro_f1_mean": 0.906,
-      "cv_macro_f1_std": 0.0035
+      "cv_macro_f1_mean": 0.4433,
+      "cv_macro_f1_std": 0.1551
     },
     "svm_rbf": {
-      "test_accuracy": 0.962,
-      "test_macro_f1": 0.9583,
-      "precision_fake": 0.909,
-      "recall_fake": 0.9857,
-      "precision_genuine": 0.9924,
-      "recall_genuine": 0.95,
+      "test_accuracy": 0.7647,
+      "test_macro_f1": 0.7424,
+      "precision_fake": 0.6667,
+      "recall_fake": 0.6667,
+      "precision_genuine": 0.8182,
+      "recall_genuine": 0.8182,
       "confusion_matrix": [
         [
-          619,
-          9
+          4,
+          2
         ],
         [
-          62,
-          1178
+          2,
+          9
         ]
       ],
-      "cv_macro_f1_mean": 0.9495,
-      "cv_macro_f1_std": 0.0019
+      "cv_macro_f1_mean": 0.4408,
+      "cv_macro_f1_std": 0.1346
     },
     "random_forest": {
-      "test_accuracy": 0.9807,
-      "test_macro_f1": 0.9783,
-      "precision_fake": 0.9837,
-      "recall_fake": 0.9586,
-      "precision_genuine": 0.9793,
-      "recall_genuine": 0.9919,
+      "test_accuracy": 0.6471,
+      "test_macro_f1": 0.6136,
+      "precision_fake": 0.5,
+      "recall_fake": 0.5,
+      "precision_genuine": 0.7273,
+      "recall_genuine": 0.7273,
       "confusion_matrix": [
         [
-          602,
-          26
+          3,
+          3
         ],
         [
-          10,
-          1230
+          3,
+          8
         ]
       ],
-      "cv_macro_f1_mean": 0.9657,
-      "cv_macro_f1_std": 0.0038
+      "cv_macro_f1_mean": 0.4777,
+      "cv_macro_f1_std": 0.1301
     },
     "knn": {
-      "test_accuracy": 0.9668,
-      "test_macro_f1": 0.9631,
-      "precision_fake": 0.9381,
-      "recall_fake": 0.965,
-      "precision_genuine": 0.982,
-      "recall_genuine": 0.9677,
+      "test_accuracy": 0.5882,
+      "test_macro_f1": 0.5825,
+      "precision_fake": 0.4444,
+      "recall_fake": 0.6667,
+      "precision_genuine": 0.75,
+      "recall_genuine": 0.5455,
       "confusion_matrix": [
         [
-          606,
-          22
+          4,
+          2
         ],
         [
-          40,
-          1200
+          5,
+          6
         ]
       ],
-      "cv_macro_f1_mean": 0.9501,
-      "cv_macro_f1_std": 0.0056
+      "cv_macro_f1_mean": 0.4519,
+      "cv_macro_f1_std": 0.0864
     }
   }
 }
