@@ -137,6 +137,12 @@ def _collect_from_dataset_dir(skipped, excluded):
         rel_root = os.path.relpath(root, DATASET_DIR)
         root_parts = [] if rel_root == "." else rel_root.split(os.sep)
 
+        # Foreign-currency data (dataset/foreign/<ccy>/...) is handled by the
+        # separate country-aware Phase-S pipeline — never pool it into the INR
+        # whole-note genuine/fake classifier (would contaminate the benchmark).
+        if root_parts and root_parts[0] == "foreign":
+            continue
+
         if _is_excluded(root_parts):
             for name in files:
                 if name.lower().endswith(_IMG_EXT):

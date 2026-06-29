@@ -26,6 +26,8 @@ tests/ocr_debug/
 # metrics.json is kept tracked as the committed benchmark record.
 models/classical/*.joblib
 models/banknote_net/
+# Phase T2 BDT counterfeit model binaries (regenerable; metrics.json kept tracked)
+models/bdt/*.joblib
 
 # Phase F experimental CNN (not adopted; regenerable via scripts/train_cnn.py)
 models/*_v2.keras
@@ -36,3 +38,6 @@ dataset/foreign/
 # Scratch eval/calibration console dumps (regenerable via the scripts)
 eval_out.txt
 calib_out.txt
+
+# Phase R — digital-PUF local registry (runtime state, per machine)
+puf_registry.json

@@ -98,6 +98,16 @@ type PredictResponse = {
   forensic_total_checks?: number;
   ml_models?: MlModels;
   forensic_analysis?: ForensicAnalysis;
+  country_detection?: { country: string; currency: string; confidence: number | null; method: string };
+  foreign_notice?: string | null;
+  polymer_features?: { status: string; details: string; value?: unknown } | null;
+  bdt_counterfeit?: {
+    available: boolean;
+    name?: string | null;
+    verdict?: string | null;
+    confidence?: string | null;
+    prob_genuine?: number | null;
+  } | null;
   message?: string;
 };
 
@@ -694,6 +704,9 @@ export default function Home() {
 
             <VerdictBanner result={result} lang={lang} />
 
+            {/* Foreign-currency detection panel (Phase S) */}
+            <CountryDetectionPanel result={result} />
+
             {/* Report download (Phase N) */}
             <div className="mt-4 flex justify-end">
               <button
@@ -1103,6 +1116,12 @@ export default function Home() {
       {/* ================================================= */}
 
       <SecurityPatternStudio />
+
+      {/* ================================================= */}
+      {/* SECURE-NOTE STUDIO (Phase R) */}
+      {/* ================================================= */}
+
+      <SecureNoteStudio />
 
       {/* ================================================= */}
       {/* LIVE CAMERA CAPTURE (Phase O) */}
@@ -1766,6 +1785,265 @@ function SecurityPatternStudio() {
         seed: {appliedSeed}
       </p>
 
+    </div>
+  );
+}
+
+// =====================================================
+// SECURE-NOTE STUDIO (Phase R) — self-authenticating note scheme
+// =====================================================
+// A proof-of-concept of a *proposed* note that authenticates itself: a serial
+// deterministically generates a guilloché (R.1), which can be re-derived and
+// compared to verify the printed note (R.2), and a texture "digital PUF"
+// fingerprint binds the physical note to a registry (R.3). NOT a check against
+// real banknotes.
+
+type SecureNoteVerifyResult = {
+  verdict: string;
+  serial: string | null;
+  serial_source: string | null;
+  similarity: number | null;
+  threshold: number;
+  match: boolean;
+  code: string | null;
+  note: string;
+};
+
+type PufResult = {
+  status?: string;
+  verdict?: string;
+  note_id?: string | null;
+  distance?: number | null;
+  similarity?: number | null;
+  fingerprint?: string;
+  registry_size?: number;
+  note?: string;
+};
+
+function verdictColor(v: string): string {
+  if (v === "AUTHENTIC") return "text-emerald-400 border-emerald-500/40 bg-emerald-500/10";
+  if (v === "TAMPERED" || v === "NO_MATCH") return "text-red-400 border-red-500/40 bg-red-500/10";
+  return "text-amber-300 border-amber-500/40 bg-amber-500/10";
+}
+
+function SecureNoteStudio() {
+  const [serialInput, setSerialInput] = useState("KKL 7MP 979885");
+  const [appliedSerial, setAppliedSerial] = useState("KKL 7MP 979885");
+
+  const [verifySerial, setVerifySerial] = useState("");
+  const [verifyResult, setVerifyResult] = useState<SecureNoteVerifyResult | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const verifyFileRef = useRef<HTMLInputElement>(null);
+
+  const [pufId, setPufId] = useState("note-001");
+  const [pufResult, setPufResult] = useState<PufResult | null>(null);
+  const [pufBusy, setPufBusy] = useState(false);
+  const pufFileRef = useRef<HTMLInputElement>(null);
+
+  const imgUrl =
+    `${BACKEND}/secure-note/generate?serial=${encodeURIComponent(appliedSerial || "0")}&size=600`;
+
+  const onVerify = async () => {
+    const f = verifyFileRef.current?.files?.[0];
+    if (!f) return;
+    setVerifyBusy(true);
+    setVerifyResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      if (verifySerial.trim()) fd.append("serial", verifySerial.trim());
+      const res = await axios.post(`${BACKEND}/secure-note/verify`, fd);
+      setVerifyResult(res.data as SecureNoteVerifyResult);
+    } catch {
+      setVerifyResult(null);
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
+  const onPuf = async (mode: "enroll" | "verify") => {
+    const f = pufFileRef.current?.files?.[0];
+    if (!f || !pufId.trim()) return;
+    setPufBusy(true);
+    setPufResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("note_id", pufId.trim());
+      const res = await axios.post(`${BACKEND}/puf/${mode}`, fd);
+      setPufResult(res.data as PufResult);
+    } catch {
+      setPufResult({ note: "Request failed — is the backend running?" });
+    } finally {
+      setPufBusy(false);
+    }
+  };
+
+  const inputCls =
+    "flex-1 bg-black border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-200 font-mono focus:outline-none focus:border-indigo-500";
+  const btnCls =
+    "bg-indigo-600 hover:bg-indigo-500 transition-all duration-300 px-6 py-3 rounded-xl text-sm font-semibold whitespace-nowrap disabled:opacity-40";
+
+  return (
+    <div className="mt-10 bg-white/[0.04] border border-white/10 rounded-3xl shadow-2xl p-8 w-full max-w-4xl">
+      <h2 className="text-3xl font-bold mb-2">Secure-Note Studio</h2>
+      <p className="text-gray-400 mb-2 text-sm max-w-2xl">
+        A proof-of-concept of a <span className="text-gray-200">self-authenticating note</span>:
+        a serial number deterministically generates a guilloché token, which can be
+        re-derived and compared to verify it, plus a texture{" "}
+        <span className="text-gray-200">digital PUF</span> fingerprint that binds a
+        physical note to a registry.
+      </p>
+      <p className="text-xs text-amber-300/80 mb-6 max-w-2xl">
+        Scheme demonstration — not real currency, and not verification of real
+        banknotes (which carry no serial-derived guilloché).
+      </p>
+
+      {/* --- 1. Generate --- */}
+      <h3 className="text-lg font-semibold mb-3">1 · Generate a secure-note token</h3>
+      <div className="flex flex-col sm:flex-row gap-3 mb-5">
+        <input
+          type="text"
+          value={serialInput}
+          onChange={(e) => setSerialInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setAppliedSerial(serialInput.trim() || "0"); }}
+          placeholder="Serial number"
+          className={inputCls}
+        />
+        <button onClick={() => setAppliedSerial(serialInput.trim() || "0")} className={btnCls}>
+          Generate
+        </button>
+      </div>
+      <div className="flex justify-center mb-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imgUrl}
+          alt={`Secure-note token for serial ${appliedSerial}`}
+          className="rounded-2xl border border-white/10 bg-white w-full max-w-md object-contain"
+        />
+      </div>
+
+      {/* --- 2. Verify --- */}
+      <h3 className="text-lg font-semibold mb-3">2 · Verify a token</h3>
+      <p className="text-gray-500 text-xs mb-3 max-w-2xl">
+        Upload a generated token. We regenerate the guilloché its serial should
+        produce and compare. The serial is optional — leave it blank to read it
+        from the token, or type it to verify against a claimed serial.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3 mb-3">
+        <input ref={verifyFileRef} type="file" accept="image/*" className={inputCls} />
+        <input
+          type="text"
+          value={verifySerial}
+          onChange={(e) => setVerifySerial(e.target.value)}
+          placeholder="Serial (optional)"
+          className={inputCls}
+        />
+        <button onClick={onVerify} disabled={verifyBusy} className={btnCls}>
+          {verifyBusy ? "Verifying…" : "Verify"}
+        </button>
+      </div>
+      {verifyResult && (
+        <div className={`rounded-xl border p-4 mb-8 text-sm ${verdictColor(verifyResult.verdict)}`}>
+          <div className="font-bold text-base">{verifyResult.verdict}</div>
+          <div className="text-gray-300 mt-1">{verifyResult.note}</div>
+          <div className="text-gray-500 font-mono text-xs mt-2">
+            serial: {verifyResult.serial ?? "—"} · similarity:{" "}
+            {verifyResult.similarity ?? "—"} / threshold {verifyResult.threshold} · source:{" "}
+            {verifyResult.serial_source ?? "—"}
+          </div>
+        </div>
+      )}
+
+      {/* --- 3. Digital PUF --- */}
+      <h3 className="text-lg font-semibold mb-3">3 · Digital PUF — note identity</h3>
+      <p className="text-gray-500 text-xs mb-3 max-w-2xl">
+        Enroll a note under an id (stores a texture fingerprint), then verify a
+        re-photographed note against the registry. Identity check — requires prior
+        enrollment; a true PUF needs controlled capture.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3 mb-3">
+        <input
+          type="text"
+          value={pufId}
+          onChange={(e) => setPufId(e.target.value)}
+          placeholder="Note id"
+          className={inputCls}
+        />
+        <input ref={pufFileRef} type="file" accept="image/*" className={inputCls} />
+        <button onClick={() => onPuf("enroll")} disabled={pufBusy} className={btnCls}>
+          {pufBusy ? "…" : "Enroll"}
+        </button>
+        <button onClick={() => onPuf("verify")} disabled={pufBusy} className={`${btnCls} bg-white/10 hover:bg-white/20`}>
+          {pufBusy ? "…" : "Verify"}
+        </button>
+      </div>
+      {pufResult && (
+        <div className={`rounded-xl border p-4 text-sm ${verdictColor(pufResult.verdict ?? pufResult.status ?? "")}`}>
+          <div className="font-bold text-base">{pufResult.verdict ?? pufResult.status ?? "—"}</div>
+          {pufResult.note && <div className="text-gray-300 mt-1">{pufResult.note}</div>}
+          <div className="text-gray-500 font-mono text-xs mt-2">
+            id: {pufResult.note_id ?? "—"}
+            {pufResult.distance != null && <> · distance: {pufResult.distance} / threshold 0.25</>}
+            {pufResult.registry_size != null && <> · registry: {pufResult.registry_size}</>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================
+// COUNTRY DETECTION PANEL (Phase S) — foreign-note routing
+// =====================================================
+// Shown only when /predict confidently detected a NON-INR note. Counterfeit
+// verification stays INR-tuned, so for a foreign note we surface the detected
+// currency + polymer cues rather than an (inapplicable) INR verdict.
+
+function CountryDetectionPanel({ result }: { result: PredictResponse }) {
+  const cd = result.country_detection;
+  if (!result.foreign_notice || !cd) return null;
+  const poly = result.polymer_features;
+  return (
+    <div className="mt-4 rounded-2xl border border-sky-500/30 bg-sky-500/10 p-5">
+      <div className="text-sm font-semibold text-sky-300">Foreign banknote detected</div>
+      <div className="text-gray-100 mt-1">
+        {cd.country} · <span className="font-mono">{cd.currency}</span>
+        {cd.confidence != null && (
+          <span className="text-gray-500 text-xs">
+            {" "}({Math.round(cd.confidence * 100)}% confidence · {cd.method})
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-gray-400 mt-2">{result.foreign_notice}</p>
+      {poly && (
+        <div className="mt-3 text-xs">
+          <span className="text-gray-400">Polymer cue: </span>
+          <span className={poly.status === "PASS" ? "text-emerald-400" : "text-gray-300"}>
+            {poly.status}
+          </span>
+          <span className="text-gray-500"> — {poly.details}</span>
+        </div>
+      )}
+      {result.bdt_counterfeit?.available && (
+        <div className="mt-2 text-xs">
+          <span className="text-gray-400">
+            Bangladesh counterfeit model ({result.bdt_counterfeit.name}):{" "}
+          </span>
+          <span
+            className={
+              result.bdt_counterfeit.verdict === "REAL"
+                ? "text-emerald-400"
+                : result.bdt_counterfeit.verdict === "FAKE"
+                ? "text-red-400"
+                : "text-amber-300"
+            }
+          >
+            {result.bdt_counterfeit.verdict}
+          </span>
+          <span className="text-gray-500"> ({result.bdt_counterfeit.confidence})</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,200 @@
+{
+  "meta": {
+    "dataset": "JaalTaka (BDT 500/1000, genuine + physical counterfeit)",
+    "seed": 42,
+    "feature_dim": 50,
+    "feature_names": [
+      "lbp_0",
+      "lbp_1",
+      "lbp_2",
+      "lbp_3",
+      "lbp_4",
+      "lbp_5",
+      "lbp_6",
+      "lbp_7",
+      "lbp_8",
+      "lbp_9",
+      "lbp_10",
+      "lbp_11",
+      "lbp_12",
+      "lbp_13",
+      "lbp_14",
+      "lbp_15",
+      "lbp_16",
+      "lbp_17",
+      "lbp_18",
+      "lbp_19",
+      "lbp_20",
+      "lbp_21",
+      "lbp_22",
+      "lbp_23",
+      "lbp_24",
+      "lbp_25",
+      "hue_0",
+      "hue_1",
+      "hue_2",
+      "hue_3",
+      "hue_4",
+      "hue_5",
+      "hue_6",
+      "hue_7",
+      "hue_8",
+      "hue_9",
+      "hue_10",
+      "hue_11",
+      "mean_sat",
+      "std_sat",
+      "mean_val",
+      "std_val",
+      "hue_entropy",
+      "aspect",
+      "edge_density",
+      "gray_mean",
+      "gray_std",
+      "microprint_logsharp",
+      "watermark_logvar",
+      "vthread_energy"
+    ],
+    "n_images": 672,
+    "train_images": 540,
+    "test_images": 132,
+    "split": "group-aware by note (label_note_id), class-balanced, no augmentation",
+    "label_scheme": "1=genuine, 0=fake",
+    "selection_metric": "cv_macro_f1_mean",
+    "best_model": "random_forest"
+  },
+  "models": {
+    "logistic_regression": {
+      "test_accuracy": 0.8561,
+      "test_macro_f1": 0.8559,
+      "precision_fake": 0.831,
+      "recall_fake": 0.8939,
+      "precision_genuine": 0.8852,
+      "recall_genuine": 0.8182,
+      "confusion_matrix": [
+        [
+          59,
+          7
+        ],
+        [
+          12,
+          54
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8533,
+      "cv_macro_f1_std": 0.016,
+      "note_count": 22,
+      "note_accuracy": 0.8636,
+      "note_macro_f1": 0.8634,
+      "note_confusion_matrix": [
+        [
+          9,
+          2
+        ],
+        [
+          1,
+          10
+        ]
+      ]
+    },
+    "svm_rbf": {
+      "test_accuracy": 0.9242,
+      "test_macro_f1": 0.9242,
+      "precision_fake": 0.9242,
+      "recall_fake": 0.9242,
+      "precision_genuine": 0.9242,
+      "recall_genuine": 0.9242,
+      "confusion_matrix": [
+        [
+          61,
+          5
+        ],
+        [
+          5,
+          61
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8782,
+      "cv_macro_f1_std": 0.0548,
+      "note_count": 22,
+      "note_accuracy": 0.9545,
+      "note_macro_f1": 0.9545,
+      "note_confusion_matrix": [
+        [
+          11,
+          0
+        ],
+        [
+          1,
+          10
+        ]
+      ]
+    },
+    "random_forest": {
+      "test_accuracy": 0.9091,
+      "test_macro_f1": 0.9089,
+      "precision_fake": 0.875,
+      "recall_fake": 0.9545,
+      "precision_genuine": 0.95,
+      "recall_genuine": 0.8636,
+      "confusion_matrix": [
+        [
+          63,
+          3
+        ],
+        [
+          9,
+          57
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8883,
+      "cv_macro_f1_std": 0.0659,
+      "note_count": 22,
+      "note_accuracy": 0.9545,
+      "note_macro_f1": 0.9545,
+      "note_confusion_matrix": [
+        [
+          11,
+          0
+        ],
+        [
+          1,
+          10
+        ]
+      ]
+    },
+    "knn": {
+      "test_accuracy": 0.9015,
+      "test_macro_f1": 0.9012,
+      "precision_fake": 0.863,
+      "recall_fake": 0.9545,
+      "precision_genuine": 0.9492,
+      "recall_genuine": 0.8485,
+      "confusion_matrix": [
+        [
+          63,
+          3
+        ],
+        [
+          10,
+          56
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8238,
+      "cv_macro_f1_std": 0.0661,
+      "note_count": 22,
+      "note_accuracy": 0.9545,
+      "note_macro_f1": 0.9545,
+      "note_confusion_matrix": [
+        [
+          11,
+          0
+        ],
+        [
+          1,
+          10
+        ]
+      ]
+    }
+  }
+}

@@ -90,13 +90,18 @@ multi-currency / polymer). Foreign sources, best first:
 
   **Do not download the full 7.58 GB.** `scripts/fetch_jaaltaka.py` reads the zip
   index over HTTP range requests and pulls only a balanced, group-preserving
-  slice (~390 MB for 50 notes/class) into `dataset/foreign/bdt/`:
+  slice (~390 MB for 50 notes/class) into the **locked foreign layout** with a
+  JSON sidecar (country/currency/substrate/denomination/side/label/source) per
+  image:
   ```
+  dataset/foreign/bdt/security_crops/{real,fake}/note_XXX_k.jpg (+ .json)
   venv\Scripts\python.exe scripts\fetch_jaaltaka.py --per-class 50
+  venv\Scripts\python.exe scripts\validate_foreign_dataset.py   # layout/metadata check
   ```
-  > After fetching, do NOT re-run `train_classical.py` until the loader is made
-  > country-aware (Phase S.1) — otherwise these BDT crops get pooled with the
-  > INR full-note corpus and contaminate the committed Indian benchmark.
+  > Safe to keep alongside the INR corpus: `build_dataset.py` **skips
+  > `dataset/foreign/`**, so these BDT crops never pool into the INR whole-note
+  > genuine/fake classifier. They feed the separate country-aware Phase-S
+  > pipeline (group-aware by `note_id`).
 
 - **BankNote-Net (Microsoft)** — 24,826 images, **17 currencies**, 112
   denominations. The public release is **embeddings (256-dim vectors), not raw

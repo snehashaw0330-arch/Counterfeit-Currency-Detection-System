@@ -11,6 +11,9 @@ note scheme + Phase S multi-currency/polymer; two-agent parallel split)
 
 ## 🆕 Active effort — Phase R + Phase S (two agents in parallel)
 
+> **Working checklist + scorecard: [PHASE_RS_PROGRESS.md](PHASE_RS_PROGRESS.md)** —
+> what's done, what's left (T1–T5), addressed one item at a time.
+
 The big new requirement (serial-guilloché generation + verification, digital
 PUF, foreign/polymer multi-currency detection) is split into two contract
 phases — see [PROJECT_SCOPE.md](PROJECT_SCOPE.md) §4 (Phase R, Phase S, and the
@@ -34,8 +37,28 @@ only, no encoder shipped, no BDT class** → kept as an OFFLINE benchmark, not t
 live country-detection path. Dataset layout locked to
 `dataset/foreign/<ccy>/{full_note,security_crops}/{real,fake}` + metadata.
 
-**Next build step (Agent A):** Phase R.1 — serial→guilloché secure-note token +
-`POST /secure-note/generate`.
+**Agent A progress (all additive; INR `/predict` verdict path contract-stable,
+test_api green, no regression):**
+- **R.1 DONE** — serial→guilloché secure-note token (`backend/security_pattern.py`
+  `secure_note_token/png`, crisp OCR-legible header) + `GET /secure-note/generate`.
+- **R.2 DONE** — closed-loop guilloché verification (`backend/secure_note.py`,
+  native-scale SSIM, calibrated 3-band AUTHENTIC/TAMPERED/UNVERIFIED, OCR-trust
+  rule so an OCR'd serial never yields a false TAMPERED) + `POST /secure-note/verify`.
+- **R.3 DONE** — digital PUF (`backend/puf.py`, texture-fingerprint Hamming hash,
+  calibrated 0.25 threshold: same-capture ≤0.04, different ≥0.36; local JSON
+  registry, git-ignored) + `POST /puf/enroll` + `POST /puf/verify`.
+- **S.2/S.3 integration DONE** — `backend/foreign_routing.py` wires Codex's
+  `country.py`+`polymer.py` into `/predict` behind a gate (detector runs ONLY
+  when the note isn't identified as INR → zero cost on the common path; confident
+  foreign → country+polymer fields + verdict forced UNVERIFIED). `POST /detect-country`.
+- **Tests:** test_phase_r_secure_note(9), _verify(13), _verify_ocr(3 slow),
+  _puf(12), test_phase_s_integration(6), + Codex country/polymer(13) + api(6) — green.
+
+**Next build steps (Agent A):** R.4 frontend (SecureNoteStudio generate+verify,
+PUF enroll/verify, country/polymer display) → R.5 docs (GENAI_EXPLAINED/REPORT,
+PROJECT_SCOPE acceptance) → normalize BDT tree to locked layout
+(`dataset/foreign/bdt/security_crops/{real,fake}`) + conform `fetch_jaaltaka.py`
++ pull full slice (validate_foreign_dataset.py flags the current old layout).
 
 
 

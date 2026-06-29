@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from backend.country import detect_country
 from backend.polymer import analyze_polymer_features
+from backend.bdt_classifier import predict_bdt
 
 # detect_country confidence required to treat a note as foreign. Codex's
 # detector reaches >=0.6 only with real issuer/currency TEXT evidence (the weak
@@ -35,30 +36,48 @@ _INR_MARKER = {
 
 
 def route_foreign(bgr, inr_identified):
-    """Return (country_detection, foreign_notice, polymer_features).
+    """Return (country_detection, foreign_notice, polymer_features, bdt_counterfeit).
 
     `inr_identified` — True if the INR pipeline confidently read the note as an
-    Indian note (denomination read / full readability); when True the detector
-    is skipped entirely. `foreign_notice` is non-None only for a confidently
-    detected foreign note, signalling the caller to mark the verdict UNVERIFIED.
-    Never raises."""
+    Indian note; when True the detector is skipped entirely (zero extra cost).
+    `foreign_notice` is non-None only for a confidently detected foreign note.
+
+    For Bangladesh (the one foreign currency with a real counterfeit model)
+    `bdt_counterfeit` carries a REAL/SUSPICIOUS/FAKE verdict; for the other
+    currencies it is None (identification + polymer cues only). Never raises."""
     try:
         if inr_identified:
-            return dict(_INR_MARKER), None, None
+            return dict(_INR_MARKER), None, None, None
 
         cd = detect_country(bgr)
         currency = cd.get("currency")
         confidence = cd.get("confidence") or 0.0
-        if currency not in ("INR", "UNKNOWN") and confidence >= _FOREIGN_CONF:
-            polymer = analyze_polymer_features(bgr)
-            notice = (
-                f"Detected a {cd.get('country', currency)} ({currency}) "
-                "banknote. Counterfeit verification is currently tuned for "
-                "Indian notes; showing currency detection and polymer security "
-                "cues only."
-            )
-            return cd, notice, polymer
-        return cd, None, None
+        if currency in ("INR", "UNKNOWN") or confidence < _FOREIGN_CONF:
+            return cd, None, None, None
+
+        polymer = analyze_polymer_features(bgr)
+        country = cd.get("country", currency)
+
+        if currency == "BDT":
+            bdt = predict_bdt(bgr)
+            if bdt.get("available"):
+                notice = (
+                    f"Detected a {country} (BDT) banknote. A Bangladesh "
+                    "counterfeit model was applied — see the verdict above."
+                )
+            else:
+                notice = (
+                    f"Detected a {country} (BDT) banknote, but the counterfeit "
+                    "model is unavailable (run scripts/train_bdt_counterfeit.py)."
+                )
+            return cd, notice, polymer, bdt
+
+        notice = (
+            f"Detected a {country} ({currency}) banknote. Counterfeit "
+            "verification is tuned for Indian/Bangladeshi notes; showing currency "
+            "detection and polymer security cues only."
+        )
+        return cd, notice, polymer, None
     except Exception:
         # Routing must never break /predict — fall back to the INR marker.
-        return dict(_INR_MARKER), None, None
+        return dict(_INR_MARKER), None, None, None

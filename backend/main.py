@@ -33,6 +33,7 @@ from backend.secure_note import verify_secure_note
 from backend.foreign_routing import route_foreign
 from backend.country import detect_country
 from backend.polymer import analyze_polymer_features
+from backend.puf import enroll as puf_enroll, verify as puf_verify
 from backend.chatbot import (
     answer as chatbot_answer,
     llm_available as chatbot_llm_available,
@@ -284,11 +285,16 @@ def _analyze(rgb_array, bgr_image):
     inr_identified = (
         bool(readability.get("denomination_read")) or readability["level"] == "full"
     )
-    country_detection, foreign_notice, polymer_features = route_foreign(
+    country_detection, foreign_notice, polymer_features, bdt_counterfeit = route_foreign(
         bgr_image, inr_identified
     )
     if foreign_notice:
-        final_verdict = "UNVERIFIED"
+        # For Bangladesh we have a real counterfeit model → use its verdict;
+        # any other foreign note has no counterfeit model → honest UNVERIFIED.
+        if bdt_counterfeit and bdt_counterfeit.get("available"):
+            final_verdict = bdt_counterfeit["verdict"]
+        else:
+            final_verdict = "UNVERIFIED"
 
     # ---- detected regions (for the frontend overlay) — Phase G.3 ----
     # Normalised [0,1] polygon of the located note in the ORIGINAL image's
@@ -334,6 +340,7 @@ def _analyze(rgb_array, bgr_image):
         "country_detection": country_detection,
         "foreign_notice": foreign_notice,
         "polymer_features": polymer_features,
+        "bdt_counterfeit": bdt_counterfeit,
     }
 
 
@@ -508,6 +515,46 @@ async def detect_country_endpoint(file: UploadFile = File(...)):
             "country_detection": detect_country(bgr),
             "polymer_features": analyze_polymer_features(bgr),
         }
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+    except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}
+
+
+# =====================================================
+# DIGITAL PUF — note identity (enroll / verify) — Phase R.3
+# =====================================================
+
+@app.post("/puf/enroll")
+async def puf_enroll_endpoint(
+    file: UploadFile = File(...),
+    note_id: str = Form(...),
+):
+    """Phase R.3 — enroll a note's texture fingerprint (digital PUF) under
+    `note_id`. Identity registration for a self-authenticating note; not a
+    counterfeit check."""
+    try:
+        _, bgr = _decode_upload(await file.read())
+        return puf_enroll(bgr, note_id)
+    except ValueError as ve:
+        return {"status": "error", "message": str(ve)}
+    except Exception as e:
+        print("\nERROR:", str(e))
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/puf/verify")
+async def puf_verify_endpoint(
+    file: UploadFile = File(...),
+    note_id: str | None = Form(None),
+):
+    """Phase R.3 — verify a note against the PUF registry → AUTHENTIC / NO_MATCH
+    / UNKNOWN (by texture-fingerprint Hamming distance). Requires prior
+    enrollment."""
+    try:
+        _, bgr = _decode_upload(await file.read())
+        return puf_verify(bgr, note_id)
     except ValueError as ve:
         return {"status": "error", "message": str(ve)}
     except Exception as e:
