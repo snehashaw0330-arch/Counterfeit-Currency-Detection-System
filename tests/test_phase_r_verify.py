@@ -53,10 +53,36 @@ def test_band_unverified_midrange(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# OCR-trust rule: an unconfirmed OCR'd serial never yields TAMPERED
+# QR path: a genuine token verifies with NO typed serial (the reliable path)
+# --------------------------------------------------------------------------
+
+def test_qr_verify_authentic_without_serial():
+    # Real generated tokens embed a QR of the serial; verification must recover
+    # it and return AUTHENTIC without any typing and without OCR guesswork.
+    r = verify_secure_note(_token("KKL7MP979885"), serial=None)
+    assert r["verdict"] == "AUTHENTIC"
+    assert r["serial_source"] == "qr"
+    assert r["serial"] == "KKL7MP979885"
+
+
+def test_qr_serial_is_trusted_enough_to_flag_tamper(monkeypatch):
+    # QR is error-corrected, so a QR'd serial whose pattern clearly mismatches is
+    # genuine tampering (unlike an OCR misread) -> TAMPERED is allowed.
+    monkeypatch.setattr(sn, "_read_serial_qr", lambda bgr: "ABC123")
+    monkeypatch.setattr(sn, "_pattern_similarity", lambda bgr, norm: 0.30)
+    r = verify_secure_note(_token("ABC123"), serial=None)
+    assert r["verdict"] == "TAMPERED"
+    assert r["serial_source"] == "qr"
+
+
+# --------------------------------------------------------------------------
+# OCR-trust rule: an unconfirmed OCR'd serial never yields TAMPERED.
+# (QR is disabled here so the OCR fallback path — used for QR-less photos — is
+# exercised in isolation.)
 # --------------------------------------------------------------------------
 
 def test_ocr_match_is_authentic(monkeypatch):
+    monkeypatch.setattr(sn, "_read_serial_qr", lambda bgr: None)
     monkeypatch.setattr(sn, "_read_serial", lambda bgr: "ABC123")
     monkeypatch.setattr(sn, "_pattern_similarity", lambda bgr, norm: 0.90)
     r = verify_secure_note(_token("ABC123"), serial=None)
@@ -66,6 +92,7 @@ def test_ocr_match_is_authentic(monkeypatch):
 
 def test_ocr_nonmatch_is_unverified_not_tampered(monkeypatch):
     # OCR misread the serial -> pattern won't match -> must NOT accuse (TAMPERED)
+    monkeypatch.setattr(sn, "_read_serial_qr", lambda bgr: None)
     monkeypatch.setattr(sn, "_read_serial", lambda bgr: "WRONGXYZ")
     monkeypatch.setattr(sn, "_pattern_similarity", lambda bgr, norm: 0.30)
     r = verify_secure_note(_token("ABC123"), serial=None)
@@ -74,6 +101,7 @@ def test_ocr_nonmatch_is_unverified_not_tampered(monkeypatch):
 
 
 def test_unverified_when_ocr_blank(monkeypatch):
+    monkeypatch.setattr(sn, "_read_serial_qr", lambda bgr: None)
     monkeypatch.setattr(sn, "_read_serial", lambda bgr: None)
     r = verify_secure_note(_token("ABC123"), serial=None)
     assert r["verdict"] == "UNVERIFIED"

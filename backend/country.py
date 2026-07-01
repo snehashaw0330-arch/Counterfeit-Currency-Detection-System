@@ -46,7 +46,9 @@ _TEXT_PATTERNS = {
         (r"\bBANGLADESH BANK\b", 8.0),
         (r"\bBANGLADESH\b", 3.0),
         (r"\bTAKA\b", 2.0),
-        (r"[\u0980-\u09FF]", 3.0),  # Bengali script
+        # Bengali-script evidence is added separately in detect_country, scaled
+        # by how much Bengali is read (see _bengali_char_count), so an incidental
+        # Bengali line on an Indian note's reverse can't trigger a false BDT.
     ],
     "GBP": [
         (r"\bBANK OF ENGLAND\b", 8.0),
@@ -187,6 +189,62 @@ def _ocr_texts_easyocr(bgr: np.ndarray) -> list[str]:
     return out
 
 
+# ---- Bengali OCR fallback (Bangladeshi notes) ------------------------------
+# The shared forensic reader is English-only, which turns a Bengali-script
+# banknote (e.g. Bangladeshi Taka) into garbage tokens — so a genuine ৳ note
+# scored 0 on every currency and fell through as UNKNOWN / mislabelled INR.
+# A Bengali-capable reader is loaded lazily and ONLY consulted when the English
+# pass found no strong issuer text, so Latin-script currencies (USD/EUR/…) never
+# pay for it. Built once and cached; a failed build degrades to "no Bengali".
+# Per-Bengali-character weight for the BDT text signal (capped at 4.5 in
+# detect_country). Calibrated so a Bengali-dominant note clears the confident
+# tier (>=3.0) while a stray Bengali line stays below it.
+_BENGALI_WEIGHT = 0.18
+
+_BENGALI_READER = None
+_BENGALI_READER_TRIED = False
+
+
+def _get_bengali_reader():
+    global _BENGALI_READER, _BENGALI_READER_TRIED
+    if _BENGALI_READER_TRIED:
+        return _BENGALI_READER
+    _BENGALI_READER_TRIED = True
+    try:
+        import easyocr
+        _BENGALI_READER = easyocr.Reader(["bn", "en"], gpu=False, verbose=False)
+    except Exception:
+        _BENGALI_READER = None
+    return _BENGALI_READER
+
+
+def _ocr_texts_bengali(bgr: np.ndarray) -> list[str]:
+    """OCR with a Bengali-capable reader. Returns normalized tokens (not
+    paragraph-merged, so Bengali density can be measured), or [] if the reader
+    is unavailable / errors. Never raises."""
+    reader = _get_bengali_reader()
+    if reader is None:
+        return []
+    try:
+        results = reader.readtext(bgr, detail=0, paragraph=False)
+    except Exception:
+        return []
+    out = []
+    for text in results:
+        text = _normalize_text(str(text))
+        if text:
+            out.append(text)
+    return out
+
+
+def _bengali_char_count(texts: Iterable[str]) -> int:
+    """How many Bengali-script characters the OCR actually read. Used to scale
+    the BDT signal by *how much* Bengali is present — a Bengali-dominant note
+    scores high, while an incidental Bengali line (e.g. the multilingual panel
+    on the reverse of an Indian note) does not reach the confident tier."""
+    return len(re.findall(r"[ঀ-৿]", " ".join(texts)))
+
+
 def _ocr_text_pool(bgr: np.ndarray) -> list[str]:
     # EasyOCR (shared singleton) is the project's primary OCR — it replaced
     # Tesseract on banknote fonts. Tesseract is kept only as a last-resort
@@ -275,6 +333,20 @@ def detect_country(image) -> dict:
     try:
         texts = _ocr_text_pool(bgr)
         text_scores = _text_scores(texts)
+
+        # Bengali fallback: when the English pass found no strong issuer text,
+        # consult a Bengali-capable reader so Bangladeshi (৳) notes — whose text
+        # the English OCR turns to garbage — get identified instead of scoring 0
+        # everywhere and slipping through as a genuine INR note. The BDT signal
+        # is scaled by how much Bengali is actually read, so a Bengali-dominant
+        # note clears the confident tier while an incidental Bengali line does not.
+        if max(text_scores.values(), default=0.0) < 3.0:
+            bn_texts = _ocr_texts_bengali(bgr)
+            if bn_texts:
+                texts = texts + bn_texts
+                text_scores = _text_scores(texts)
+                text_scores["BDT"] += min(4.5, _BENGALI_WEIGHT * _bengali_char_count(bn_texts))
+
         palette_scores = _palette_scores(bgr)
 
         combined = {}

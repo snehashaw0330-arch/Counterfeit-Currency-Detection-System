@@ -328,10 +328,33 @@ def _text_strip(text, color, target_w, pad=4):
     return tile
 
 
+def _qr_image(data, px):
+    """Deterministic QR image (RGBA, ~`px` square) encoding `data`.
+
+    High error-correction so the code survives a screenshot / photograph, which
+    makes verification robust WITHOUT relying on OCR of the printed serial (a
+    single misread character regenerates the wrong pattern). Same data -> same
+    pixels (qrcode picks version + mask deterministically). Returns None if the
+    qrcode lib is unavailable, so the token still renders (just without the QR)."""
+    try:
+        import qrcode
+        from qrcode.constants import ERROR_CORRECT_H
+        qr = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_H,
+                           box_size=10, border=2)
+        qr.add_data(data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+        return img.resize((int(px), int(px)), Image.NEAREST)
+    except Exception:
+        return None
+
+
 def secure_note_token(serial, size=DEFAULT_SIZE) -> Image.Image:
     """Deterministic SECURE-NOTE TOKEN for `serial`: the serial-seeded guilloché
-    disc plus a clean header carrying the canonical serial and its verification
-    CODE. Same serial (any formatting) -> byte-identical image. Never raises."""
+    disc plus a clean header carrying a scannable QR of the serial, the canonical
+    serial text, and its verification CODE. The QR lets verification recover the
+    serial reliably (no OCR guesswork). Same serial (any formatting) ->
+    byte-identical image. Never raises."""
     norm = normalize_serial(serial)
     code = serial_token(norm)
     size = _clamp_size(size)
@@ -339,17 +362,30 @@ def secure_note_token(serial, size=DEFAULT_SIZE) -> Image.Image:
     ink = (40, 52, 74)
     try:
         disc = generate_pattern(norm, size)  # RGBA guilloché, serial-seeded
-        header_h = max(56, int(size * 0.2))
+        header_h = max(96, int(size * 0.26))
         canvas = Image.new("RGBA", (size, size + header_h), paper)
         canvas.alpha_composite(disc, (0, header_h))
 
-        title = _text_strip("SECURE NOTE TOKEN", ink, int(size * 0.46))
-        canvas.alpha_composite(title, ((size - title.width) // 2,
-                                       int(header_h * 0.14)))
+        # QR (serial) on the left; title + serial/code text centered in the
+        # remaining width. If the QR lib is missing, text falls back to full-width.
+        margin = max(8, header_h // 12)
+        qr_px = header_h - 2 * margin
+        qr = _qr_image(f"SECURE-NOTE:{norm or '-'}", qr_px)
+        if qr is not None:
+            canvas.alpha_composite(qr, (margin, margin))
+            text_x0 = margin + qr_px + margin
+        else:
+            text_x0 = 0
+        text_w = max(1, size - text_x0 - margin)
+        tcx = text_x0 + text_w // 2
+
+        title = _text_strip("SECURE NOTE TOKEN", ink, int(text_w * 0.92))
+        canvas.alpha_composite(title, (tcx - title.width // 2,
+                                       int(header_h * 0.16)))
         line = _text_strip(f"SERIAL {norm or '-'}   CODE {code}", ink,
-                           int(size * 0.78))
-        canvas.alpha_composite(line, ((size - line.width) // 2,
-                                      int(header_h * 0.52)))
+                           int(text_w * 0.98))
+        canvas.alpha_composite(line, (tcx - line.width // 2,
+                                      int(header_h * 0.56)))
         return canvas
     except Exception:
         return _fallback_pattern(size, _seed_to_int(norm))

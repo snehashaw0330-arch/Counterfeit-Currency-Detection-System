@@ -6,7 +6,90 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-06-29 (Phase R + S + T1–T5 complete — self-auth scheme,
+**Last updated:** 2026-07-01 (Two fixes: (1) foreign notes could pass as genuine
+INR — a Bangladeshi ৳1000 read as "Genuine ₹100"; (2) Secure-Note Studio now
+self-verifies via an embedded QR + honest UI feedback. Both verified end-to-end,
+NOT committed, backend restart required. See the two sections below.)
+
+## 🔐 Secure-Note Studio fix (2026-07-01) — QR self-verification + UI feedback
+
+**Reported:** user said "none of the buttons work" and a genuine token wouldn't
+verify. Diagnosed live (all 4 endpoints actually work):
+- Generate ✓ deterministic (byte-identical PNG per serial — req #1 solid).
+- Verify ✓ **only when the serial is typed** — the default (no-serial) path OCR'd
+  the serial off the token and misread it (`7`→`Z`) → regenerated the wrong
+  pattern → UNVERIFIED. A "self-authenticating note" that can't read its own
+  serial looks broken.
+- PUF enroll/verify ✓ works (req #3 solid).
+- Buttons *felt* dead because Verify/Enroll/PUF-Verify **silently no-op without a
+  chosen file** (`if(!f) return`) and Verify swallowed errors.
+- (The `�` mojibake in messages was a FALSE ALARM — my terminal, not the app;
+  the response is valid UTF-8, browser renders "Guilloché" fine.)
+
+**Fix (user chose: embed a scannable code + all fixes):**
+- **B — QR self-verification.** `security_pattern.py` embeds a deterministic QR
+  (`SECURE-NOTE:<serial>`, error-correction H) in the token header (new dep
+  `qrcode`; header enlarged, disc unchanged so SSIM is unaffected). `secure_note.py`
+  decodes it with cv2 `QRCodeDetector` (no new dep) as a **trusted** serial source
+  (input → **qr** → OCR). A genuine token now verifies **AUTHENTIC with no typing**
+  (source=`qr`, sim 0.79); QR is error-corrected so it can still flag TAMPERED
+  (unlike OCR). OCR-trust rule retained for QR-less photos.
+- **A — honest UI.** `SecureNoteStudio` now shows "Choose a file first" instead of
+  silent no-op, surfaces request errors, a "✓ Generated" cue + serial caption
+  under the token, and clearer QR-verify helper text.
+- **C — not needed** (encoding was a terminal artifact).
+
+**Verification:** QR round-trip AUTHENTIC/no-serial; wrong serial → TAMPERED;
+determinism byte-identical; `test_phase_r_secure_note` + `test_phase_r_verify`
+(now with QR-path guards) = **24 passed**; `tsc` clean.
+
+---
+
+
+
+## 🐞 Foreign-routing bugfix (2026-07-01) — a BDT note read as "Genuine ₹100"
+
+**Reported:** user uploaded a genuine Bangladeshi ৳1000 note; UI showed
+**"Likely Genuine ₹100" 99.97%** and NO foreign-currency panel. Reproduced on
+the live backend with `dataset/foreign/bdt/security_crops/real/note_113_4.jpg`.
+
+**Root cause — three stacked defects (all verified via /predict + /diagnose):**
+1. **Gate false-positive (`backend/main.py`):** `inr_identified` was
+   `denomination_read OR level=="full"`. The English-only EasyOCR reads a Bengali
+   note as garbage (`"2774TT"`, `"I5 5 00 8 96 9 0"`, …); the INR denomination
+   matcher latched a **"₹100"** onto stray digits → `denomination_read=True` →
+   `inr_identified=True` → `route_foreign` **skipped the detector entirely** and
+   returned the hardcoded India/INR marker. A denomination number is shared
+   across currencies and is **not** evidence of Indian-ness.
+2. **Detector blind to BDT (`backend/country.py`):** even when run, the detector
+   scored 0 on a Bengali note (English OCR can't read Bengali script) → UNKNOWN.
+3. **UI (`frontend/app/page.tsx`):** the verdict banner always appended
+   `₹{denom}`, so even a correctly-detected foreign note would show "₹100".
+
+**Fix (verified end-to-end, no INR regression):**
+- **Gate:** `inr_identified = readability["level"] == "full"` — a bare
+  denomination read no longer suppresses foreign detection. Fully-legible INR
+  notes still skip the detector (zero cost); partial/garbled reads always run it.
+- **Detector:** added a **lazily-loaded Bengali EasyOCR reader** (`["bn","en"]`)
+  consulted ONLY when the English pass finds no strong issuer text (Latin
+  currencies never pay for it). BDT is scored by **Bengali-character density**
+  (`_BENGALI_WEIGHT`, capped) so a Bengali-dominant note clears the confident
+  tier while an incidental Bengali line (INR reverse multilingual panel) does not.
+- **UI:** banner suppresses `₹{denom}` when `foreign_notice` is set (headline +
+  read-aloud); the `CountryDetectionPanel` shows currency + BDT verdict.
+
+**Verification:** the ৳1000 → `Bangladesh / BDT (0.88)` + BDT model `REAL 96.67%`
++ foreign panel, no "₹100". INR ₹500 (full) skips detector, stays REAL; INR ₹2000
+(partial) runs detector, correctly returns INR, stays REAL. `tsc` clean;
+`test_country` (now +2 guards: Bengali-script BDT, incidental-Bengali≠BDT) +
+`test_polymer` + `test_phase_s_integration` = **23 passed**.
+
+**Not committed yet.** Backend must be **restarted** to load the fix live
+(the running uvicorn still has the old code).
+
+---
+
+**Prev update:** 2026-06-29 (Phase R + S + T1–T5 complete — self-auth scheme,
 BDT counterfeit model 0.909/0.955, multi-currency detection, evaluation + report)
 
 ## 🆕 Active effort — Phase R + Phase S (two agents in parallel)

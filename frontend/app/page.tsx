@@ -1833,19 +1833,32 @@ function SecureNoteStudio() {
   const [verifySerial, setVerifySerial] = useState("");
   const [verifyResult, setVerifyResult] = useState<SecureNoteVerifyResult | null>(null);
   const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   const [pufId, setPufId] = useState("note-001");
   const [pufResult, setPufResult] = useState<PufResult | null>(null);
   const [pufBusy, setPufBusy] = useState(false);
+  const [pufError, setPufError] = useState<string | null>(null);
   const pufFileRef = useRef<HTMLInputElement>(null);
+
+  const [justGenerated, setJustGenerated] = useState(false);
 
   const imgUrl =
     `${BACKEND}/secure-note/generate?serial=${encodeURIComponent(appliedSerial || "0")}&size=600`;
 
+  const onGenerate = () => {
+    setAppliedSerial(serialInput.trim() || "0");
+    // Visible confirmation even when the serial is unchanged (the token is
+    // deterministic, so the image itself may not change).
+    setJustGenerated(true);
+    window.setTimeout(() => setJustGenerated(false), 1400);
+  };
+
   const onVerify = async () => {
     const f = verifyFileRef.current?.files?.[0];
-    if (!f) return;
+    if (!f) { setVerifyError("Choose a token image first."); setVerifyResult(null); return; }
+    setVerifyError(null);
     setVerifyBusy(true);
     setVerifyResult(null);
     try {
@@ -1855,7 +1868,7 @@ function SecureNoteStudio() {
       const res = await axios.post(`${BACKEND}/secure-note/verify`, fd);
       setVerifyResult(res.data as SecureNoteVerifyResult);
     } catch {
-      setVerifyResult(null);
+      setVerifyError("Request failed — is the backend running?");
     } finally {
       setVerifyBusy(false);
     }
@@ -1863,7 +1876,9 @@ function SecureNoteStudio() {
 
   const onPuf = async (mode: "enroll" | "verify") => {
     const f = pufFileRef.current?.files?.[0];
-    if (!f || !pufId.trim()) return;
+    if (!pufId.trim()) { setPufError("Enter a note id first."); setPufResult(null); return; }
+    if (!f) { setPufError("Choose a note image first."); setPufResult(null); return; }
+    setPufError(null);
     setPufBusy(true);
     setPufResult(null);
     try {
@@ -1873,7 +1888,7 @@ function SecureNoteStudio() {
       const res = await axios.post(`${BACKEND}/puf/${mode}`, fd);
       setPufResult(res.data as PufResult);
     } catch {
-      setPufResult({ note: "Request failed — is the backend running?" });
+      setPufError("Request failed — is the backend running?");
     } finally {
       setPufBusy(false);
     }
@@ -1906,32 +1921,38 @@ function SecureNoteStudio() {
           type="text"
           value={serialInput}
           onChange={(e) => setSerialInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") setAppliedSerial(serialInput.trim() || "0"); }}
+          onKeyDown={(e) => { if (e.key === "Enter") onGenerate(); }}
           placeholder="Serial number"
           className={inputCls}
         />
-        <button onClick={() => setAppliedSerial(serialInput.trim() || "0")} className={btnCls}>
-          Generate
+        <button onClick={onGenerate} className={btnCls}>
+          {justGenerated ? "✓ Generated" : "Generate"}
         </button>
       </div>
-      <div className="flex justify-center mb-8">
+      <div className="flex flex-col items-center mb-8">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imgUrl}
           alt={`Secure-note token for serial ${appliedSerial}`}
           className="rounded-2xl border border-white/10 bg-white w-full max-w-md object-contain"
         />
+        <p className="text-xs text-gray-500 mt-2 font-mono">
+          Token for serial <span className="text-gray-300">{appliedSerial}</span> · same serial always
+          produces this exact pattern
+        </p>
       </div>
 
       {/* --- 2. Verify --- */}
       <h3 className="text-lg font-semibold mb-3">2 · Verify a token</h3>
       <p className="text-gray-500 text-xs mb-3 max-w-2xl">
-        Upload a generated token. We regenerate the guilloché its serial should
-        produce and compare. The serial is optional — leave it blank to read it
-        from the token, or type it to verify against a claimed serial.
+        Upload a generated token. We read its embedded QR to recover the serial,
+        regenerate the guilloché that serial should produce, and compare — so a
+        genuine token verifies with <span className="text-gray-300">no typing</span>.
+        The serial box is optional (type it to verify against a claimed serial).
       </p>
       <div className="flex flex-col sm:flex-row gap-3 mb-3">
-        <input ref={verifyFileRef} type="file" accept="image/*" className={inputCls} />
+        <input ref={verifyFileRef} type="file" accept="image/*" className={inputCls}
+          onChange={() => { setVerifyError(null); setVerifyResult(null); }} />
         <input
           type="text"
           value={verifySerial}
@@ -1943,6 +1964,11 @@ function SecureNoteStudio() {
           {verifyBusy ? "Verifying…" : "Verify"}
         </button>
       </div>
+      {verifyError && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 p-3 mb-8 text-sm">
+          {verifyError}
+        </div>
+      )}
       {verifyResult && (
         <div className={`rounded-xl border p-4 mb-8 text-sm ${verdictColor(verifyResult.verdict)}`}>
           <div className="font-bold text-base">{verifyResult.verdict}</div>
@@ -1970,7 +1996,8 @@ function SecureNoteStudio() {
           placeholder="Note id"
           className={inputCls}
         />
-        <input ref={pufFileRef} type="file" accept="image/*" className={inputCls} />
+        <input ref={pufFileRef} type="file" accept="image/*" className={inputCls}
+          onChange={() => { setPufError(null); setPufResult(null); }} />
         <button onClick={() => onPuf("enroll")} disabled={pufBusy} className={btnCls}>
           {pufBusy ? "…" : "Enroll"}
         </button>
@@ -1978,6 +2005,11 @@ function SecureNoteStudio() {
           {pufBusy ? "…" : "Verify"}
         </button>
       </div>
+      {pufError && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 p-3 text-sm">
+          {pufError}
+        </div>
+      )}
       {pufResult && (
         <div className={`rounded-xl border p-4 text-sm ${verdictColor(pufResult.verdict ?? pufResult.status ?? "")}`}>
           <div className="font-bold text-base">{pufResult.verdict ?? pufResult.status ?? "—"}</div>
@@ -2074,7 +2106,12 @@ function VerdictBanner({ result, lang }: { result: PredictResponse; lang: Lang }
   const sub = lang === "hi" && hi ? hi.sub : display.sub;
 
   const denomRaw = result.forensic_analysis?.denomination_classification?.value;
-  const denom = typeof denomRaw === "string" ? denomRaw : null;
+  // The ₹ denomination is an INR-pipeline reading and is meaningless for a
+  // foreign note (its digits are often a mis-OCR of foreign script). Suppress
+  // it whenever a foreign banknote was detected — the currency is shown by the
+  // CountryDetectionPanel instead — so a Bangladeshi ৳1000 never reads "₹100".
+  const isForeign = !!result.foreign_notice;
+  const denom = !isForeign && typeof denomRaw === "string" ? denomRaw : null;
 
   const isUnverified = verdict === "UNVERIFIED";
   const isLimited = !isUnverified && level === "partial";

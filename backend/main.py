@@ -278,13 +278,19 @@ def _analyze(rgb_array, bgr_image):
     final_confidence = round(max(combined_score, 1 - combined_score) * 100, 2)
 
     # ---- foreign-currency routing (Phase S.3) — additive; INR path unchanged --
-    # Only run the (heavy) country detector when the INR-tuned pipeline did NOT
-    # identify an Indian note, so confidently-classified INR notes pay zero extra
-    # cost. A confidently-detected foreign note is marked UNVERIFIED so an
-    # INR-tuned gate never mislabels it FAKE (we have no foreign counterfeit model).
-    inr_identified = (
-        bool(readability.get("denomination_read")) or readability["level"] == "full"
-    )
+    # Skip the (heavier) country detector ONLY when the note read as a *fully*
+    # legible Indian note, so cleanly-classified INR notes pay zero extra cost.
+    #
+    # NOTE — do NOT treat a bare `denomination_read` as "this is Indian": a
+    # foreign note (e.g. a Bangladeshi ৳1000) whose script the English OCR can't
+    # read produces garbage that the INR denomination matcher can still latch a
+    # "₹100" onto — which used to set inr_identified=True and skip detection,
+    # letting a foreign note masquerade as a genuine Indian note. A denomination
+    # number is shared across currencies and is NOT evidence of Indian-ness.
+    # Requiring full readability keeps the fast path for genuine INR notes (which
+    # read serial + proportions + denomination) while a partial/garbled read
+    # always runs the detector so foreign notes get identified.
+    inr_identified = readability["level"] == "full"
     country_detection, foreign_notice, polymer_features, bdt_counterfeit = route_foreign(
         bgr_image, inr_identified
     )

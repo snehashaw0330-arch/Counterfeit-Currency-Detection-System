@@ -80,6 +80,27 @@ def _pattern_similarity(bgr, norm):
     return float(structural_similarity(expected, extracted, data_range=255))
 
 
+_QR_PREFIX = "SECURE-NOTE:"
+
+
+def _read_serial_qr(bgr):
+    """Decode the QR embedded in a secure-note token -> the serial, or None.
+
+    A QR carries its own error-correction + checksum, so unlike OCR it either
+    decodes correctly or not at all — it never returns a *wrong* serial. Only a
+    QR bearing our domain prefix is honoured, so a stray QR in the frame is
+    ignored. This is the reliable, no-typing verification path. Never raises."""
+    try:
+        detector = cv2.QRCodeDetector()
+        data, _pts, _ = detector.detectAndDecode(np.asarray(bgr))
+    except Exception:
+        return None
+    if not data or not str(data).startswith(_QR_PREFIX):
+        return None
+    serial = str(data)[len(_QR_PREFIX):].strip()
+    return serial or None
+
+
 def _read_serial(bgr):
     """Best-effort OCR of the token header -> the serial string, or None.
 
@@ -112,8 +133,16 @@ def verify_secure_note(bgr, serial=None):
     try:
         source = "input"
         if serial is None or not str(serial).strip():
-            serial = _read_serial(bgr)
-            source = "ocr"
+            # Prefer the embedded QR (trustworthy, error-corrected) so a genuine
+            # token verifies with no typing; fall back to OCR (untrusted) only if
+            # there is no QR — e.g. a photo of an older, QR-less token.
+            qr_serial = _read_serial_qr(bgr)
+            if qr_serial:
+                serial = qr_serial
+                source = "qr"
+            else:
+                serial = _read_serial(bgr)
+                source = "ocr"
 
         if not serial or not normalize_serial(serial):
             result["note"] = ("Could not determine a serial number (none "
