@@ -6,10 +6,13 @@ multi-currency identification layer. All numbers are regenerable from the script
 named below; held-out splits are group-aware (no leakage) and model selection is
 by cross-validation (no test-set peeking).
 
-> **Foreign counterfeit detection is only possible for currencies with real
-> fakes.** JaalTaka gives genuine + physical-counterfeit BDT; INR has our fixture
-> fakes. AUD/CAD/GBP/PHP have genuine references only (no public counterfeit
-> data), so they get identification + polymer cues, never a counterfeit verdict.
+> **A credible counterfeit benchmark needs real fakes.** JaalTaka gives genuine
+> + physical-counterfeit BDT; INR has our fixture fakes. **AUD (2026-07-02)**
+> has a partner-supplied set whose fakes are **synthetic** (digitally-altered
+> copies of the reals) — its model is trained + wired live via the generic
+> per-currency pipeline, but its score measures *manipulation detection*, not
+> physical-counterfeit detection (caveat in metrics.json, the /predict notice,
+> and the UI). CAD/GBP/PHP remain identification + polymer cues only.
 
 ## Headline (counterfeit detection)
 
@@ -17,6 +20,17 @@ by cross-validation (no test-set peeking).
 |---|---|---|---|---|
 | **BDT** (Bangladesh) | 672 imgs · 132 test / 22 notes | **Random Forest** | **0.909 image / 0.955 note** | 0.909 |
 | **INR** (India) | 65 fixture imgs · 17 test | SVM (RBF) | 0.765 | 0.742 |
+| **AUD** (Australia) ⚠ synthetic fakes | 700 imgs · 251 test (group-aware, fake paired w/ its real twin) | Random Forest (CV 0.913) | 0.924 | 0.924 |
+| **CAD** (Canada) ⚠ synthetic fakes | 335 imgs · 121 test (group-aware, fake paired w/ its real twin) | Random Forest (CV 0.948) | 0.942 | 0.942 |
+
+> ⚠ **AUD/CAD caveat:** those scores are against *synthetic* fakes (small
+> catalog scans, each fake derived from its real twin). They demonstrate the
+> generic pipeline (`scripts/train_foreign_counterfeit.py`) end-to-end on two
+> drop-in currencies; they do NOT claim real-world counterfeit power. Real
+> physical fakes would make these true benchmarks. Also note: such low-res
+> scans often fail currency identification (OCR-starved), so they may not
+> reach the per-currency model in the live gate — full-resolution photos route
+> correctly (verified live: AUD 0.82, CAD 0.88 conf).
 
 The gap is the project's recurring lesson made concrete: **data quantity
 dominates.** With 672 real images BDT reaches 0.91/0.955; the 65-image INR

@@ -1,0 +1,152 @@
+{
+  "meta": {
+    "currency": "CAD",
+    "seed": 42,
+    "feature_dim": 50,
+    "feature_names": [
+      "lbp_0",
+      "lbp_1",
+      "lbp_2",
+      "lbp_3",
+      "lbp_4",
+      "lbp_5",
+      "lbp_6",
+      "lbp_7",
+      "lbp_8",
+      "lbp_9",
+      "lbp_10",
+      "lbp_11",
+      "lbp_12",
+      "lbp_13",
+      "lbp_14",
+      "lbp_15",
+      "lbp_16",
+      "lbp_17",
+      "lbp_18",
+      "lbp_19",
+      "lbp_20",
+      "lbp_21",
+      "lbp_22",
+      "lbp_23",
+      "lbp_24",
+      "lbp_25",
+      "hue_0",
+      "hue_1",
+      "hue_2",
+      "hue_3",
+      "hue_4",
+      "hue_5",
+      "hue_6",
+      "hue_7",
+      "hue_8",
+      "hue_9",
+      "hue_10",
+      "hue_11",
+      "mean_sat",
+      "std_sat",
+      "mean_val",
+      "std_val",
+      "hue_entropy",
+      "aspect",
+      "edge_density",
+      "gray_mean",
+      "gray_std",
+      "microprint_logsharp",
+      "watermark_logvar",
+      "vthread_energy"
+    ],
+    "n_images": 335,
+    "n_real": 168,
+    "n_fake": 167,
+    "train_images": 214,
+    "test_images": 121,
+    "split": "group-aware (sidecar group / filename), class-balanced, no augmentation",
+    "label_scheme": "1=genuine, 0=fake",
+    "selection_metric": "cv_macro_f1_mean",
+    "best_model": "random_forest",
+    "fakes_are_synthetic": true,
+    "honesty_note": "Fakes are SYNTHETIC (digitally-altered copies of the real images); these metrics reflect detection of that manipulation, not of real physical counterfeits. Re-train on real physical counterfeit photos for a credible benchmark."
+  },
+  "models": {
+    "logistic_regression": {
+      "test_accuracy": 0.9504,
+      "test_macro_f1": 0.9504,
+      "precision_fake": 0.9655,
+      "recall_fake": 0.9333,
+      "precision_genuine": 0.9365,
+      "recall_genuine": 0.9672,
+      "confusion_matrix": [
+        [
+          56,
+          4
+        ],
+        [
+          2,
+          59
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8876,
+      "cv_macro_f1_std": 0.0537
+    },
+    "svm_rbf": {
+      "test_accuracy": 0.9256,
+      "test_macro_f1": 0.9254,
+      "precision_fake": 0.9636,
+      "recall_fake": 0.8833,
+      "precision_genuine": 0.8939,
+      "recall_genuine": 0.9672,
+      "confusion_matrix": [
+        [
+          53,
+          7
+        ],
+        [
+          2,
+          59
+        ]
+      ],
+      "cv_macro_f1_mean": 0.9011,
+      "cv_macro_f1_std": 0.0277
+    },
+    "random_forest": {
+      "test_accuracy": 0.9421,
+      "test_macro_f1": 0.9421,
+      "precision_fake": 0.9492,
+      "recall_fake": 0.9333,
+      "precision_genuine": 0.9355,
+      "recall_genuine": 0.9508,
+      "confusion_matrix": [
+        [
+          56,
+          4
+        ],
+        [
+          3,
+          58
+        ]
+      ],
+      "cv_macro_f1_mean": 0.948,
+      "cv_macro_f1_std": 0.035
+    },
+    "knn": {
+      "test_accuracy": 0.876,
+      "test_macro_f1": 0.8738,
+      "precision_fake": 1.0,
+      "recall_fake": 0.75,
+      "precision_genuine": 0.8026,
+      "recall_genuine": 1.0,
+      "confusion_matrix": [
+        [
+          45,
+          15
+        ],
+        [
+          0,
+          61
+        ]
+      ],
+      "cv_macro_f1_mean": 0.8106,
+      "cv_macro_f1_std": 0.0364
+    }
+  }
+}

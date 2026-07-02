@@ -30,7 +30,11 @@ from backend.classical import predict_classical, warmup_classical, classical_sta
 from backend.genai import explain as genai_explain, llm_available
 from backend.security_pattern import pattern_png, secure_note_png
 from backend.secure_note import verify_secure_note
-from backend.foreign_routing import route_foreign
+from backend.foreign_routing import (
+    route_foreign,
+    serial_looks_inr,
+    lacks_currency_identity,
+)
 from backend.country import detect_country
 from backend.polymer import analyze_polymer_features
 from backend.puf import enroll as puf_enroll, verify as puf_verify
@@ -279,28 +283,52 @@ def _analyze(rgb_array, bgr_image):
 
     # ---- foreign-currency routing (Phase S.3) — additive; INR path unchanged --
     # Skip the (heavier) country detector ONLY when the note read as a *fully*
-    # legible Indian note, so cleanly-classified INR notes pay zero extra cost.
+    # legible Indian note AND its serial has the Indian number-panel shape, so
+    # cleanly-classified INR notes pay zero extra cost.
     #
-    # NOTE — do NOT treat a bare `denomination_read` as "this is Indian": a
-    # foreign note (e.g. a Bangladeshi ৳1000) whose script the English OCR can't
-    # read produces garbage that the INR denomination matcher can still latch a
-    # "₹100" onto — which used to set inr_identified=True and skip detection,
-    # letting a foreign note masquerade as a genuine Indian note. A denomination
-    # number is shared across currencies and is NOT evidence of Indian-ness.
-    # Requiring full readability keeps the fast path for genuine INR notes (which
-    # read serial + proportions + denomination) while a partial/garbled read
-    # always runs the detector so foreign notes get identified.
-    inr_identified = readability["level"] == "full"
-    country_detection, foreign_notice, polymer_features, bdt_counterfeit = route_foreign(
+    # Two hard-won lessons behind this gate (both hit in production):
+    # - A bare `denomination_read` is NOT evidence of Indian-ness: a Bangladeshi
+    #   ৳1000 whose Bengali script garbles under English OCR still yielded a
+    #   "₹100" — so partial reads must run the detector.
+    # - Full readability alone is ALSO not evidence: a Canadian $20 (Latin
+    #   script) reads serial+proportions cleanly, hitting level=="full" and
+    #   masquerading as INR. The serial SHAPE discriminates (INR = digit+2
+    #   letters+6 digits; CAD = 3 letters+7 digits) — positive INR evidence.
+    # Failing the shape check merely runs the detector: for a true INR note it
+    # returns INR/UNKNOWN → no notice → verdict unchanged (latency-only), so
+    # this gate can only get safer, never change an Indian verdict.
+    inr_serial = forensic_analysis.get("ocr_serial_number", {}).get("value")
+    inr_identified = (
+        readability["level"] == "full" and serial_looks_inr(inr_serial)
+    )
+    country_detection, foreign_notice, polymer_features, foreign_counterfeit = route_foreign(
         bgr_image, inr_identified
     )
     if foreign_notice:
-        # For Bangladesh we have a real counterfeit model → use its verdict;
-        # any other foreign note has no counterfeit model → honest UNVERIFIED.
-        if bdt_counterfeit and bdt_counterfeit.get("available"):
-            final_verdict = bdt_counterfeit["verdict"]
+        # A currency with a trained per-currency model (models/<ccy>/ — BDT,
+        # AUD, …) gets its own REAL/SUSPICIOUS/FAKE verdict; a foreign note
+        # without one has no counterfeit model → honest UNVERIFIED.
+        if foreign_counterfeit and foreign_counterfeit.get("available"):
+            final_verdict = foreign_counterfeit["verdict"]
         else:
             final_verdict = "UNVERIFIED"
+    elif (
+        final_verdict in ("REAL", "SUSPICIOUS")
+        and lacks_currency_identity(country_detection, inr_serial)
+    ):
+        # The currency could not be established at all (detector ran → UNKNOWN,
+        # no INR-shaped serial). The INR pipeline's REAL/SUSPICIOUS is
+        # meaningless for a note that may not even be Indian — a 147×320
+        # Canadian thumbnail once read "Likely Genuine" here. Downgrade-only:
+        # never clears a foreign note, never touches identified-INR verdicts,
+        # and a clear structural FAKE is kept (that gate needs no identity).
+        final_verdict = "UNVERIFIED"
+        if not readability.get("guidance"):
+            readability["guidance"] = (
+                "Couldn't identify the note's currency from this photo. Retake "
+                "closer and sharper (fill the frame, good light, note flat) so "
+                "the note can be identified and properly checked."
+            )
 
     # ---- detected regions (for the frontend overlay) — Phase G.3 ----
     # Normalised [0,1] polygon of the located note in the ORIGINAL image's
@@ -346,7 +374,7 @@ def _analyze(rgb_array, bgr_image):
         "country_detection": country_detection,
         "foreign_notice": foreign_notice,
         "polymer_features": polymer_features,
-        "bdt_counterfeit": bdt_counterfeit,
+        "foreign_counterfeit": foreign_counterfeit,
     }
 
 

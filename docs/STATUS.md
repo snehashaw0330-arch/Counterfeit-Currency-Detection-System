@@ -6,7 +6,110 @@ chat resumes with zero context loss. The full plan lives in
 [PROJECT_SCOPE.md](PROJECT_SCOPE.md); phase history in
 [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
-**Last updated:** 2026-07-01 (Two fixes: (1) foreign notes could pass as genuine
+**Last updated:** 2026-07-02 (AUD + CAD counterfeit detection shipped via a NEW
+GENERIC per-currency pipeline — partner datasets ingested, models trained
+honestly, BDT-only code retired. Plus the 2026-07-01 foreign-routing and
+Secure-Note fixes below. NOT committed, backend restart required.)
+
+## 🎨 Multi-currency UI polish + second gate hole closed (2026-07-02 evening)
+
+**User tested a CAD $5 fake thumbnail in the UI → "Couldn't Confirm ₹50"** with
+no currency info, and flagged the UI as INR-only. Two things fixed:
+
+**(1) UI was INR-only in copy + misleading for non-INR results:**
+- Hero badge/copy → multi-currency ("identifies 8 currencies, counterfeit
+  models for INR · BDT · AUD · CAD"); PDF report footer likewise.
+- Verdict banner: ₹denomination now ALSO suppressed when the currency detector
+  returned UNKNOWN (it was OCR residue — "₹50" on a Canadian $5), with a new
+  sky-blue hint: "currency couldn't be identified — these checks assume an
+  Indian ₹ note; if foreign, this verdict doesn't apply".
+- "What we checked": amber caption when the note is foreign/unidentified (the
+  detailed checks are INR-calibrated). tsc clean.
+
+**(2) Second gate hole (mirror of the ৳1000 bug) found via live test:** a
+genuine **CAD $20 (601×1600) OCR'd cleanly** → serial+proportions read →
+`level=="full"` → detector skipped → INR verdict, no country panel. Readable ≠
+Indian. Gate now requires **positive INR evidence**:
+`inr_identified = level=="full" AND serial_looks_inr(serial)` — INR number-panel
+shape (digit+2letters / 3-digit specimen prefix + exactly 6 digits; CAD is
+3letters+7digits → fails). Safe-by-construction: failing the shape check only
+runs the detector (INR/UNKNOWN → verdict unchanged, latency-only).
+`serial_looks_inr` lives in TF-free `foreign_routing.py`; +12 shape tests
+(17 pass in the routing suite). Verified e2e: CAD $20 real+fake both route to
+Canada/CAD; INR 500/2000 + BDT regressions unchanged.
+
+**(3) Residual hole CLOSED (downgrade rule):** user then tested a CAD $10
+**147×320 thumbnail** → detector UNKNOWN (measured: at that size OCR reads
+"EGLAIDA" for CANADA even at 2×/3× upscale — physically below the OCR floor,
+upscaling can't invent pixels) → INR pipeline said "Likely Genuine 92.38%".
+New rule in `_analyze`: verdict REAL/SUSPICIOUS **+ detector UNKNOWN + no
+INR-shaped serial → UNVERIFIED** ("couldn't identify the currency — retake").
+Downgrade-only: can never clear a foreign note, never touches identified-INR
+or identified-foreign verdicts, structural FAKE kept.
+`lacks_currency_identity` in `foreign_routing.py` (+4 tests → routing suite 21,
+fast set **36 passed**). **E2e evidence:** CAD $10 thumbnail → UNVERIFIED ✓;
+CAD $20 real/fake still → Canada/CAD REAL/FAKE via model ✓; BDT → REAL ✓;
+**6/6 genuine INR** (kaggle 500+2000, fixtures 100/50/20 obv + 100 reverse) →
+REAL with India/INR identity — zero downgrades on genuine INR ✓.
+> Full-corpus re-measure (65-img `evaluate_system.py`) still worth running for
+> the record — do it when the app is CLOSED (heavy pass).
+
+## 🇨🇦 CAD — second drop-in currency (2026-07-02, same session)
+
+Proved the generic pipeline: **zero code changes** needed. Partner `Canadian
+Dataset` (zip in Downloads) → scanned (172/172 per class, fakes again SYNTHETIC
+1:1 twins, 91–99% px changed; web-catalog scans median ~124×200 px) → imported
+**167 real / 167 fake** (5 tiny <100px skipped per side, all groups paired) to
+`dataset/foreign/cad/full_note/{real,fake}/` → `train_foreign_counterfeit.py cad`
+→ **models/cad: RandomForest CV 0.948, test acc 0.942** (synthetic caveat
+recorded) → staging removed, validator green (1,716 foreign imgs), INR corpus
+byte-identical (65). `/predict` picks up models/cad automatically.
+
+## 🇦🇺 AUD + generic foreign counterfeit pipeline (2026-07-02)
+
+**Partner dataset:** `Australian Dataset` (zip in Downloads) — 5 denominations
+(5/10/20/50/100), ~351 real + 349 fake images. Two honest findings:
+- The **fakes are SYNTHETIC** — each is a digitally-altered copy of its real
+  twin (97% pixels changed, same source image), NOT physical counterfeits. The
+  images are small web-catalog scans (67–320 px), not phone photos.
+- One "real AUD $20" was actually a **2002 US penny** (leftover from the same
+  autonomous Wikipedia fetch that produced the mislabelled CAD images) — removed,
+  retrained.
+
+**What shipped (all additive, INR path untouched — index still 65/42/23):**
+- **Data:** imported to the locked layout `dataset/foreign/aud/full_note/{real,fake}/`
+  with full 7-key sidecars + a `group` id pairing each fake with its real twin
+  (so group-aware splits can't leak); staging copy removed from `dataset/Dataset/`.
+- **Trainer:** `scripts/train_foreign_counterfeit.py <ccy>` — GENERIC per-currency
+  trainer (same 4 techniques + group-aware CV as BDT/INR); auto-detects synthetic
+  fakes from sidecars and **records the caveat in metrics.json**.
+- **Model:** `models/aud/` — best by CV = **RandomForest 0.913** (test acc 0.924,
+  SVM 0.932). ⚠ Measures *manipulation detection*, not physical-counterfeit
+  detection (synthetic fakes) — stated in metrics, notice, and UI.
+- **Inference:** NEW `backend/foreign_classifier.py` — generic per-currency
+  loader/predictor (`predict_foreign(ccy, img)`, per-ccy cache, 3-band verdict,
+  `synthetic_fakes` flag). **`backend/bdt_classifier.py` retired** (BDT now goes
+  through the same generic path; models/bdt unchanged).
+- **Routing:** `foreign_routing.py` now tries a counterfeit model for ANY
+  confident foreign currency; `/predict` field renamed
+  **`bdt_counterfeit` → `foreign_counterfeit`** (+ `currency`, `synthetic_fakes`).
+  Frontend panel generalised ("<Country> counterfeit model") + amber synthetic-
+  fakes caveat. `build_dataset.py` hardened: `dataset/Dataset/` can never leak
+  into the INR corpus (reported as excluded).
+- **Tests:** `test_phase_t_bdt.py` → `test_phase_t_foreign.py` (generic, +synthetic
+  flag, +per-ccy cache); `test_phase_s_integration.py` rewritten for the generic
+  contract (+AUD case, +caveat-in-notice). **30 passed**; tsc clean; foreign
+  validator green (1,382 imgs); INR index byte-identical (65).
+
+**Next currency = drop-in:** partner supplies `real/`+`fake/` images → import to
+`dataset/foreign/<ccy>/full_note/{real,fake}/` with sidecars → run
+`train_foreign_counterfeit.py <ccy>` → `/predict` picks it up automatically
+(no code changes). Real *physical* fakes would upgrade the caveat to a true
+counterfeit benchmark.
+
+---
+
+**Prev:** 2026-07-01 (Two fixes: (1) foreign notes could pass as genuine
 INR — a Bangladeshi ৳1000 read as "Genuine ₹100"; (2) Secure-Note Studio now
 self-verifies via an embedded QR + honest UI feedback. Both verified end-to-end,
 NOT committed, backend restart required. See the two sections below.)
@@ -39,9 +142,16 @@ verify. Diagnosed live (all 4 endpoints actually work):
   under the token, and clearer QR-verify helper text.
 - **C — not needed** (encoding was a terminal artifact).
 
-**Verification:** QR round-trip AUTHENTIC/no-serial; wrong serial → TAMPERED;
-determinism byte-identical; `test_phase_r_secure_note` + `test_phase_r_verify`
-(now with QR-path guards) = **24 passed**; `tsc` clean.
+- **Screenshot robustness.** User verified a *screenshot* of the token → TAMPERED
+  0.14 (the QR read fine, but the dark page-bg padding threw off the disc crop).
+  `secure_note._disc_bgr` now `_trim_dark_border`s the near-uniform dark margin
+  first (no-op on the exact PNG; refuses aggressive trims). Screenshots at any
+  padding → AUTHENTIC 0.79; tamper still caught through padding.
+
+**Verification:** QR round-trip AUTHENTIC/no-serial; screenshot (padded) →
+AUTHENTIC; wrong serial → TAMPERED; determinism byte-identical;
+`test_phase_r_secure_note` + `test_phase_r_verify` (now with QR-path guards) =
+**24 passed**; `tsc` clean.
 
 ---
 

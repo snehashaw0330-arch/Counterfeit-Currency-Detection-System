@@ -103,6 +103,25 @@ multi-currency / polymer). Foreign sources, best first:
   > genuine/fake classifier. They feed the separate country-aware Phase-S
   > pipeline (group-aware by `note_id`).
 
+- **Partner AUD + CAD datasets (2026-07-02)** — AUD: ~351 real + 349 fake
+  (5/10/20/50/100) → `dataset/foreign/aud/full_note/{real,fake}/`; CAD: 167 real
+  + 167 fake (same denominations) → `dataset/foreign/cad/full_note/{real,fake}/`.
+  Sidecars include a `group` id pairing each fake with its source real.
+  **Honesty (applies to both):** the fakes are **synthetic** (digitally-altered
+  copies of the reals — 91–99% pixels changed, same source), and the images are
+  small web-catalog scans. The trained models (`models/aud` RF CV 0.913,
+  `models/cad` RF CV 0.948) therefore measure *manipulation detection*, not
+  physical-counterfeit detection — the caveat is recorded in metrics.json and
+  surfaced in the UI. Real physical fakes would upgrade these to true benchmarks.
+
+  **Adding the next currency is drop-in** (no code changes):
+  ```
+  dataset/foreign/<ccy>/full_note/{real,fake}/<img> (+ .json sidecars w/ group)
+  venv\Scripts\python.exe scripts\train_foreign_counterfeit.py <ccy>
+  venv\Scripts\python.exe scripts\validate_foreign_dataset.py
+  ```
+  `/predict` auto-detects the new `models/<ccy>/` via `backend/foreign_classifier.py`.
+
 - **BankNote-Net (Microsoft)** — 24,826 images, **17 currencies**, 112
   denominations. The public release is **embeddings (256-dim vectors), not raw
   images**, and **genuine only**. Useful for the country/currency *detection*

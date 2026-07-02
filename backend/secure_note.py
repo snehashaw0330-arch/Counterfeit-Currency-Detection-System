@@ -61,10 +61,33 @@ def _gray(arr_bgr):
     return arr.astype(np.uint8)
 
 
+def _trim_dark_border(bgr):
+    """Crop away a near-uniform DARK margin — e.g. the page background captured
+    when a user screenshots the token — so the light paper card is recovered
+    before the disc is cut out. No-op on the exact PNG (all light) and refuses to
+    trim aggressively (a genuinely dark image is left alone). Never raises."""
+    try:
+        arr = np.asarray(bgr)
+        gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY) if arr.ndim == 3 else arr
+        ys, xs = np.where(gray > 40)          # light (paper) pixels
+        if xs.size == 0:
+            return bgr
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        y0, y1 = int(ys.min()), int(ys.max()) + 1
+        # Only accept a sane crop; ignore a suspicious near-total trim.
+        if (x1 - x0) >= gray.shape[1] * 0.5 and (y1 - y0) >= gray.shape[0] * 0.5:
+            return arr[y0:y1, x0:x1]
+    except Exception:
+        pass
+    return bgr
+
+
 def _disc_bgr(bgr):
     """The guilloché disc of an uploaded token: the bottom WxW square (token
-    layout = header band over a square disc). If the image is already ~square
-    (disc only), the whole image is used."""
+    layout = header band over a square disc). A dark screenshot margin is
+    trimmed first so the disc lines up. If the image is already ~square (disc
+    only), the whole image is used."""
+    bgr = _trim_dark_border(bgr)
     h, w = bgr.shape[:2]
     return bgr[h - w:h, 0:w] if h > w else bgr
 

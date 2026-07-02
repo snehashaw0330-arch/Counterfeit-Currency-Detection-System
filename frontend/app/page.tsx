@@ -101,12 +101,14 @@ type PredictResponse = {
   country_detection?: { country: string; currency: string; confidence: number | null; method: string };
   foreign_notice?: string | null;
   polymer_features?: { status: string; details: string; value?: unknown } | null;
-  bdt_counterfeit?: {
+  foreign_counterfeit?: {
     available: boolean;
+    currency?: string | null;
     name?: string | null;
     verdict?: string | null;
     confidence?: string | null;
     prob_genuine?: number | null;
+    synthetic_fakes?: boolean;
   } | null;
   message?: string;
 };
@@ -291,7 +293,9 @@ function buildReportHtml(result: PredictResponse, imageDataUrl: string) {
     <table class="checks"><tbody>${rows}</tbody></table>
     <div class="note">This automated screening uses a phone-photo image and can be wrong, especially on
     high-quality counterfeits. Always verify suspicious notes by hand (tilt for colour-shift, hold to
-    light for the watermark, feel the raised print) or at a bank. Indian Rupees only.</div>
+    light for the watermark, feel the raised print) or at a bank. Detailed forensic checks are
+    calibrated for Indian Rupees; other currencies get identification plus a per-currency model
+    where available (BDT, AUD, CAD).</div>
   </body></html>`;
 }
 
@@ -466,7 +470,7 @@ export default function Home() {
 
         <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs font-medium text-emerald-300/90 mb-6 backdrop-blur">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Indian Rupee · Forensic + AI
+          Multi-currency · Forensic + AI
         </span>
 
         <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-[1.05]">
@@ -480,10 +484,11 @@ export default function Home() {
         </h1>
 
         <p className="text-gray-400 mt-5 max-w-2xl mx-auto leading-relaxed">
-          Upload a photo of an Indian banknote. The system fuses a deep-learning
-          classifier with a forensic check pipeline, shows what it found in plain
-          language, and is honest when it can&apos;t be sure. A screening aid —
-          not a guarantee.
+          Upload a banknote photo. Tuned for <span className="text-gray-200">Indian ₹ notes</span> with
+          a deep-learning classifier + forensic checks; automatically identifies
+          8 currencies and runs counterfeit models for{" "}
+          <span className="text-gray-200">INR · BDT · AUD · CAD</span>. Plain-language
+          results, honest when it can&apos;t be sure. A screening aid — not a guarantee.
         </p>
 
         {/* Language toggle (Phase M — accessibility/reach) */}
@@ -1847,12 +1852,38 @@ function SecureNoteStudio() {
   const imgUrl =
     `${BACKEND}/secure-note/generate?serial=${encodeURIComponent(appliedSerial || "0")}&size=600`;
 
+  const [downloading, setDownloading] = useState(false);
+
   const onGenerate = () => {
     setAppliedSerial(serialInput.trim() || "0");
     // Visible confirmation even when the serial is unchanged (the token is
     // deterministic, so the image itself may not change).
     setJustGenerated(true);
     window.setTimeout(() => setJustGenerated(false), 1400);
+  };
+
+  // Download the exact, high-resolution token PNG so it can be verified without
+  // the detail loss a screenshot introduces (screenshots downscale the fine
+  // guilloché line-work and land in the inconclusive band).
+  const onDownload = async () => {
+    setDownloading(true);
+    try {
+      const url =
+        `${BACKEND}/secure-note/generate?serial=${encodeURIComponent(appliedSerial || "0")}&size=1000`;
+      const res = await axios.get(url, { responseType: "blob" });
+      const blobUrl = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `secure-note-${(appliedSerial || "0").replace(/[^A-Za-z0-9]/g, "") || "0"}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      /* best-effort; the token is still visible above */
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const onVerify = async () => {
@@ -1928,6 +1959,10 @@ function SecureNoteStudio() {
         <button onClick={onGenerate} className={btnCls}>
           {justGenerated ? "✓ Generated" : "Generate"}
         </button>
+        <button onClick={onDownload} disabled={downloading}
+          className={`${btnCls} bg-white/10 hover:bg-white/20`}>
+          {downloading ? "…" : "Download token"}
+        </button>
       </div>
       <div className="flex flex-col items-center mb-8">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1936,9 +1971,13 @@ function SecureNoteStudio() {
           alt={`Secure-note token for serial ${appliedSerial}`}
           className="rounded-2xl border border-white/10 bg-white w-full max-w-md object-contain"
         />
-        <p className="text-xs text-gray-500 mt-2 font-mono">
+        <p className="text-xs text-gray-500 mt-2 font-mono text-center">
           Token for serial <span className="text-gray-300">{appliedSerial}</span> · same serial always
           produces this exact pattern
+        </p>
+        <p className="text-xs text-sky-300/80 mt-1 text-center max-w-md">
+          To verify below, click <span className="font-semibold">Download token</span> and upload that
+          file — a screenshot loses fine detail and may read as inconclusive.
         </p>
       </div>
 
@@ -2057,23 +2096,29 @@ function CountryDetectionPanel({ result }: { result: PredictResponse }) {
           <span className="text-gray-500"> — {poly.details}</span>
         </div>
       )}
-      {result.bdt_counterfeit?.available && (
+      {result.foreign_counterfeit?.available && (
         <div className="mt-2 text-xs">
           <span className="text-gray-400">
-            Bangladesh counterfeit model ({result.bdt_counterfeit.name}):{" "}
+            {cd.country} counterfeit model ({result.foreign_counterfeit.name}):{" "}
           </span>
           <span
             className={
-              result.bdt_counterfeit.verdict === "REAL"
+              result.foreign_counterfeit.verdict === "REAL"
                 ? "text-emerald-400"
-                : result.bdt_counterfeit.verdict === "FAKE"
+                : result.foreign_counterfeit.verdict === "FAKE"
                 ? "text-red-400"
                 : "text-amber-300"
             }
           >
-            {result.bdt_counterfeit.verdict}
+            {result.foreign_counterfeit.verdict}
           </span>
-          <span className="text-gray-500"> ({result.bdt_counterfeit.confidence})</span>
+          <span className="text-gray-500"> ({result.foreign_counterfeit.confidence})</span>
+          {result.foreign_counterfeit.synthetic_fakes && (
+            <div className="text-amber-300/80 mt-1">
+              ⚠ Trained on synthetic (digitally-altered) fakes — detects digital
+              manipulation, not physical counterfeits.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2110,8 +2155,13 @@ function VerdictBanner({ result, lang }: { result: PredictResponse; lang: Lang }
   // foreign note (its digits are often a mis-OCR of foreign script). Suppress
   // it whenever a foreign banknote was detected — the currency is shown by the
   // CountryDetectionPanel instead — so a Bangladeshi ৳1000 never reads "₹100".
+  // Same when the currency detector ran but couldn't identify the note
+  // (UNKNOWN): the note may not be Indian at all, so stamping "₹50" on e.g. a
+  // Canadian $5 thumbnail would be misleading.
   const isForeign = !!result.foreign_notice;
-  const denom = !isForeign && typeof denomRaw === "string" ? denomRaw : null;
+  const currencyUnknown = result.country_detection?.currency === "UNKNOWN";
+  const denom =
+    !isForeign && !currencyUnknown && typeof denomRaw === "string" ? denomRaw : null;
 
   const isUnverified = verdict === "UNVERIFIED";
   const isLimited = !isUnverified && level === "partial";
@@ -2180,6 +2230,18 @@ function VerdictBanner({ result, lang }: { result: PredictResponse; lang: Lang }
         <div className="mt-4 rounded-xl bg-black/30 border border-yellow-500/30 p-3">
           <p className="text-sm text-yellow-300">
             ⚠ {result.guidance}
+          </p>
+        </div>
+      )}
+
+      {/* Currency unidentified — the INR-tuned result may not even apply */}
+      {currencyUnknown && !isForeign && (
+        <div className="mt-4 rounded-xl bg-black/30 border border-sky-500/30 p-3">
+          <p className="text-sm text-sky-200">
+            🌐 The currency couldn&apos;t be identified from this photo. These checks
+            assume an Indian ₹ note — if this is a foreign note, this verdict
+            doesn&apos;t apply to it. Retake closer and sharper so the currency can
+            be identified (supported: INR, BDT, AUD, CAD, USD, EUR, PHP, GBP).
           </p>
         </div>
       )}
@@ -2292,6 +2354,12 @@ function PlainFindings({ result }: { result: PredictResponse }) {
   const fa = result.forensic_analysis;
   if (!fa) return null;
 
+  // These detailed checks (Gandhi portrait, ₹ typography, bleed lines, …) are
+  // calibrated for Indian notes. For a detected-foreign or unidentified note
+  // they still ran, but must be read as INR-specific — say so.
+  const isForeign = !!result.foreign_notice;
+  const currencyUnknown = result.country_detection?.currency === "UNKNOWN";
+
   return (
     <div className="mt-8 bg-white/[0.04] border border-white/10 rounded-2xl p-5">
 
@@ -2299,6 +2367,17 @@ function PlainFindings({ result }: { result: PredictResponse }) {
       <p className="text-sm text-gray-500 mb-5">
         Plain-language summary. ✓ looks right · ✗ a problem · — couldn&apos;t check.
       </p>
+
+      {(isForeign || currencyUnknown) && (
+        <div className="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+          <p className="text-xs text-amber-200">
+            ⚠ These detailed checks are designed for Indian ₹ notes.{" "}
+            {isForeign
+              ? "For this foreign note, rely on the currency panel above."
+              : "The currency of this note couldn't be identified, so read them with caution."}
+          </p>
+        </div>
+      )}
 
       <div className="space-y-5">
         {GROUP_ORDER.map((group) => {

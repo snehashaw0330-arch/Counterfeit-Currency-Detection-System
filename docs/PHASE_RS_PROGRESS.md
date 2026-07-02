@@ -17,10 +17,10 @@ this file is the living checklist we work through **one item at a time**.
 | 2 | Same serial → same unique pattern | ✅ Done |
 | 3 | Guilloché verification (generated vs extracted) | ✅ Done |
 | 4 | Digital PUF for unique note authentication | ✅ Done |
-| 5 | Support for foreign polymer banknotes | 🟡 Partial (detection + polymer cues; no foreign counterfeit verdict) |
-| 6 | Expand dataset with multi-country polymer notes | ✅ Done (BDT 672-img slice normalized + validated; BankNote-Net + genuine polymer refs; polymer-counterfeit data n/a) |
+| 5 | Support for foreign polymer banknotes | 🟢 AUD (polymer) now has detection + polymer cues + a counterfeit model (synthetic-fake caveat); CAD/GBP detection-only |
+| 6 | Expand dataset with multi-country polymer notes | ✅ Done (BDT 672-img slice; partner AUD 700-img real+synthetic-fake set in `dataset/foreign/aud/`; BankNote-Net + genuine polymer refs) |
 | 7 | Automatic country & currency detection | ✅ Done (GBP still weak/UNKNOWN) |
-| 8 | Multi-currency **counterfeit** detection | 🟢 Done for INR + BDT (BDT model: 0.909 image / 0.955 note acc); AUD/CAD/GBP/PHP impossible (no public fake data) |
+| 8 | Multi-currency **counterfeit** detection | 🟢 INR + BDT (0.909/0.955, real physical fakes) + **AUD via the generic per-currency pipeline (RF 0.913 CV — ⚠ synthetic fakes: manipulation-detection, not physical-counterfeit)**; other currencies drop-in once partner data arrives |
 | 9 | Polymer-specific forensic/security checks | ✅ Done (window + sheen; tested on genuine refs) |
 | 10 | Update report (guilloché, PUF, polymer) | 🟢 Done (REPORT §10 + GENAI_EXPLAINED Parts 5–6 + PROJECT_SCOPE R/S acceptance) |
 | 11 | Evaluate on Indian + foreign datasets | 🟢 Done ([MULTICURRENCY_EVAL.md](MULTICURRENCY_EVAL.md): BDT 0.909/0.955, INR 0.765, one-class rejected) |

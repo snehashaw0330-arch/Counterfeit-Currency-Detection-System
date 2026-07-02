@@ -137,10 +137,21 @@ def _collect_from_dataset_dir(skipped, excluded):
         rel_root = os.path.relpath(root, DATASET_DIR)
         root_parts = [] if rel_root == "." else rel_root.split(os.sep)
 
-        # Foreign-currency data (dataset/foreign/<ccy>/...) is handled by the
-        # separate country-aware Phase-S pipeline — never pool it into the INR
-        # whole-note genuine/fake classifier (would contaminate the benchmark).
+        # Two subtrees are NEVER pooled into the INR whole-note genuine/fake
+        # classifier (both would contaminate the benchmark):
+        #   dataset/foreign/  — country-aware Phase-S data (own pipeline; silent
+        #     skip, it is fully managed by its own scripts + validator).
+        #   dataset/Dataset/  — a staging/reference area (Phase-E feature crops,
+        #     partner-supplied foreign sets, etc.). A stray `Real`/`Fake` folder
+        #     dropped here must not silently enter the INR corpus — e.g. an
+        #     Australian AUD set placed under dataset/Dataset/.../{Real,Fake}/.
+        #     Reported via `excluded` so the operator can see what was kept out.
         if root_parts and root_parts[0] == "foreign":
+            continue
+        if root_parts and root_parts[0] == "Dataset":
+            for name in files:
+                if name.lower().endswith(_IMG_EXT):
+                    excluded.append(_rel(os.path.join(root, name)))
             continue
 
         if _is_excluded(root_parts):
