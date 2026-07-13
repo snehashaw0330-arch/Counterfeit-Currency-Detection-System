@@ -127,6 +127,10 @@ type ExplainResponse = {
   message?: string;
 };
 
+const BACKEND = (
+  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://127.0.0.1:8000"
+).replace(/\/$/, "");
+
 const VERDICT_COLOR: Record<string, string> = {
   REAL: "text-green-400",
   FAKE: "text-red-400",
@@ -409,7 +413,7 @@ export default function Home() {
 
       const response = await axios.post(
 
-        "http://127.0.0.1:8000/predict",
+        `${BACKEND}/predict`,
 
         formData,
 
@@ -1516,7 +1520,7 @@ function ExplainPanel({ result, lang }: { result: PredictResponse; lang: Lang })
       setError("");
 
       const response = await axios.post<ExplainResponse>(
-        "http://127.0.0.1:8000/explain",
+        `${BACKEND}/explain`,
         { ...result, lang },
         { headers: { "Content-Type": "application/json" } }
       );
@@ -1686,8 +1690,6 @@ function ExplainPanel({ result, lang }: { result: PredictResponse; lang: Lang })
 // micro-text) from a seed. Same seed → same art, so a pattern keyed to a serial
 // can be regenerated and visually compared. It is decorative art — it does NOT
 // generate currency.
-
-const BACKEND = "http://127.0.0.1:8000";
 
 function SecurityPatternStudio() {
 
